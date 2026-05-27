@@ -1,0 +1,41 @@
+[project]
+name = "kanban-agent-orchestrator"
+version = "0.1.0"
+description = "Kanban-first central orchestrator for OpenAI-compatible agent runners."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.136.3",
+    "pydantic>=2.13.4",
+    "uvicorn>=0.38.0",
+]
+
+[project.scripts]
+kanban-agent-orchestrator = "kanban_agent_orchestrator:main"
+
+[dependency-groups]
+dev = [
+    "black>=26.5.1",
+    "httpx>=0.28.1",
+    "pytest>=9.0.3",
+    "ruff>=0.15.14",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.14,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.black]
+line-length = 160
+target-version = ["py312"]
+
+[tool.ruff]
+line-length = 160
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
