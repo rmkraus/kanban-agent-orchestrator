@@ -99,10 +99,6 @@ export function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div>
-          <div className="eyebrow">Agent orchestration</div>
-          <h1>Kanban</h1>
-        </div>
         <div className="topbar-actions">
           <button className="secondary menu-button" type="button" aria-expanded={isMainMenuOpen} onClick={() => setIsMainMenuOpen((open) => !open)}>
             Menu
@@ -150,6 +146,10 @@ export function App() {
               </button>
             </div>
           )}
+        </div>
+        <div>
+          <div className="eyebrow">Agent orchestration</div>
+          <h1>Kanban</h1>
         </div>
       </header>
 

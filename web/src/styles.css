@@ -41,7 +41,7 @@ button {
 .topbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 16px;
   padding: 24px 30px 18px;
   border-bottom: 1px solid #ded8ce;
@@ -88,7 +88,7 @@ h3 {
 
 .topbar-actions {
   position: relative;
-  justify-content: flex-end;
+  justify-content: flex-start;
   flex-wrap: wrap;
 }
 
@@ -99,10 +99,12 @@ h3 {
 .main-menu {
   position: absolute;
   top: calc(100% + 8px);
-  right: 0;
+  left: 0;
   z-index: 10;
   display: grid;
+  width: max-content;
   min-width: 230px;
+  max-width: calc(100vw - 60px);
   gap: 10px;
   border: 1px solid #ded8ce;
   border-radius: 16px;
@@ -586,10 +588,11 @@ dd {
   }
 
   .topbar-actions {
-    justify-content: end;
+    justify-content: start;
   }
 
   .main-menu {
+    max-width: calc(100vw - 28px);
     min-width: min(280px, calc(100vw - 28px));
   }
 
