@@ -66,16 +66,90 @@ class OrchestratorKernel:
         priority: int = 0,
         exclusive: bool = False,
         status: TaskStatus = TaskStatus.TODO,
+        parent_ids: list[str] | None = None,
+        created_by: str = "system",
     ) -> Task:
         if agent_endpoint_id not in self.agent_endpoints:
             raise NotFoundError(f"agent endpoint not found: {agent_endpoint_id}")
+        parents = []
+        for parent_id in parent_ids or []:
+            parent = self._task(parent_id)
+            if parent.id not in parents:
+                parents.append(parent.id)
 
         task = Task(title=title, body=body, agent_endpoint_id=agent_endpoint_id, priority=priority, exclusive=exclusive, status=status)
+        task.parent_ids.update(parents)
         self.tasks[task.id] = task
-        self._event(EventKind.CREATED, f"Task created: {title}", task_id=task.id)
+        for parent_id in parents:
+            parent = self._task(parent_id)
+            parent.child_ids.add(task.id)
+            parent.updated_at = utc_now()
+        self._event(EventKind.CREATED, f"Task created: {title}", task_id=task.id, metadata={"created_by": created_by, "agent_endpoint_id": agent_endpoint_id})
+        for parent_id in parents:
+            self._event(
+                EventKind.DEPENDENCY, f"Dependency added: {self._task(parent_id).title} -> {task.title}", task_id=task.id, metadata={"parent_id": parent_id}
+            )
         self.recompute_readiness()
         self._save()
         return task
+
+    def create_task_for_agent(
+        self,
+        title: str,
+        assignee: str,
+        body: str = "",
+        priority: int = 0,
+        exclusive: bool = False,
+        parent_id: str | None = None,
+        dependency_ids: list[str] | None = None,
+        created_by: str = "agent",
+    ) -> Task:
+        endpoint = self.agent_endpoint_by_name(assignee)
+        parent_ids = [parent_id] if parent_id is not None else []
+        parent_ids.extend(dependency_ids or [])
+        return self.create_task(
+            title=title,
+            agent_endpoint_id=endpoint.id,
+            body=body,
+            priority=priority,
+            exclusive=exclusive,
+            parent_ids=parent_ids,
+            created_by=created_by,
+        )
+
+    def create_task_from_run(
+        self,
+        run_id: str,
+        title: str,
+        assignee: str,
+        body: str = "",
+        priority: int = 0,
+        exclusive: bool = False,
+        parent_current_task: bool = True,
+        dependency_ids: list[str] | None = None,
+    ) -> Task:
+        run = self._run(run_id)
+        if run.status not in {RunStatus.LEASED, RunStatus.RUNNING}:
+            raise InvalidTransitionError(f"cannot create task from terminal run: {run_id}")
+        parent_id = run.task_id if parent_current_task else None
+        return self.create_task_for_agent(
+            title=title,
+            assignee=assignee,
+            body=body,
+            priority=priority,
+            exclusive=exclusive,
+            parent_id=parent_id,
+            dependency_ids=dependency_ids,
+            created_by=run.runner_id,
+        )
+
+    def agent_endpoint_by_name(self, name: str) -> AgentEndpoint:
+        matches = [endpoint for endpoint in self.agent_endpoints.values() if endpoint.name == name]
+        if not matches:
+            raise NotFoundError(f"agent endpoint not found by name: {name}")
+        if len(matches) > 1:
+            raise InvalidTransitionError(f"agent endpoint name is ambiguous: {name}")
+        return matches[0]
 
     def list_tasks(self, status: TaskStatus | None = None) -> list[Task]:
         tasks = self.tasks.values()

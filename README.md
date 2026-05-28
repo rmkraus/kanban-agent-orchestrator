@@ -50,6 +50,7 @@ Human/operator API:
 - `POST /api/v1/agent-endpoints`
 - `GET /api/v1/tasks`
 - `POST /api/v1/tasks`
+- `POST /api/v1/agent-tasks` — agent-friendly creation by assignee name, with optional parent/dependency IDs.
 - `GET /api/v1/tasks/{task_id}`
 - `POST /api/v1/tasks/{task_id}/unblock`
 - `POST /api/v1/tasks/{task_id}/comments`
@@ -61,6 +62,7 @@ Runner API:
 
 - `POST /runner/v1/lease`
 - `POST /runner/v1/runs/{run_id}/heartbeat`
+- `POST /runner/v1/runs/{run_id}/tasks` — create follow-up tasks from an active run.
 - `POST /runner/v1/runs/{run_id}/finish`
 - `POST /runner/v1/runs/{run_id}/fail`
 - `POST /runner/v1/runs/{run_id}/block`

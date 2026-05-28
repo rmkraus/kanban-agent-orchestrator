@@ -110,6 +110,53 @@ def test_expired_lease_is_reclaimed_and_task_can_be_released() -> None:
     assert second_lease.task.id == task.id
 
 
+def test_agent_can_create_follow_up_task_by_assignee_name() -> None:
+    kernel = OrchestratorKernel()
+    reviewer = kernel.create_agent_endpoint("reviewer")
+    coder = kernel.create_agent_endpoint("coder")
+    parent = kernel.create_task("review", reviewer.id)
+
+    child = kernel.create_task_for_agent(
+        title="fix finding",
+        assignee="coder",
+        body="Patch the bug found during review.",
+        parent_id=parent.id,
+        priority=5,
+        created_by="reviewer-runner",
+    )
+
+    assert child.agent_endpoint_id == coder.id
+    assert child.priority == 5
+    assert child.parent_ids == {parent.id}
+    assert child.id in parent.child_ids
+    assert child.status == TaskStatus.TODO
+    assert any(event.kind == "created" and event.metadata.get("created_by") == "reviewer-runner" for event in kernel.events)
+
+
+def test_running_agent_can_create_child_task_from_run() -> None:
+    kernel = OrchestratorKernel()
+    reviewer = kernel.create_agent_endpoint("reviewer")
+    coder = kernel.create_agent_endpoint("coder")
+    review_task = kernel.create_task("review", reviewer.id)
+    lease = kernel.lease_next("reviewer-runner")
+    assert lease is not None
+
+    child = kernel.create_task_from_run(
+        run_id=lease.run.id,
+        title="fix review finding",
+        assignee="coder",
+        body="Follow-up created by the running review agent.",
+    )
+
+    assert child.agent_endpoint_id == coder.id
+    assert child.parent_ids == {review_task.id}
+    assert child.status == TaskStatus.TODO
+
+    kernel.complete_run(lease.run.id)
+
+    assert child.status == TaskStatus.READY
+
+
 def test_fastapi_minimal_lease_flow() -> None:
     client = TestClient(create_app(OrchestratorKernel()))
 
