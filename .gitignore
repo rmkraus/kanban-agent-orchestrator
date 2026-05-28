@@ -13,7 +13,10 @@ wheels/
 /data/
 *.sqlite
 *.db
+/src/kanban_agent_orchestrator/static/
 
-# Tool caches
+# JavaScript-generated files
+web/node_modules/
+web/dist/
 .pytest_cache/
 .ruff_cache/

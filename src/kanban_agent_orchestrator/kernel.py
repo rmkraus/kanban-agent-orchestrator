@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from uuid import uuid4
 
 from kanban_agent_orchestrator.errors import DependencyCycleError, InvalidTransitionError, NotFoundError
 from kanban_agent_orchestrator.models import (
@@ -9,6 +10,8 @@ from kanban_agent_orchestrator.models import (
     Event,
     EventKind,
     Lease,
+    Question,
+    QuestionStatus,
     Run,
     RunStatus,
     Snapshot,
@@ -30,6 +33,7 @@ class OrchestratorKernel:
         self.runs: dict[str, Run] = {run.id: run for run in snapshot.runs}
         self.events: list[Event] = snapshot.events
         self.comments: dict[str, Comment] = {comment.id: comment for comment in snapshot.comments}
+        self.questions: dict[str, Question] = {question.id: question for question in snapshot.questions}
         self.artifacts: dict[str, Artifact] = {artifact.id: artifact for artifact in snapshot.artifacts}
         self.next_event_id = snapshot.next_event_id
 
@@ -44,6 +48,7 @@ class OrchestratorKernel:
             runs=list(self.runs.values()),
             events=self.events,
             comments=list(self.comments.values()),
+            questions=list(self.questions.values()),
             artifacts=list(self.artifacts.values()),
             next_event_id=self.next_event_id,
         )
@@ -165,6 +170,7 @@ class OrchestratorKernel:
             children=[self._task(child_id) for child_id in sorted(task.child_ids)],
             runs=[run for run in self.runs.values() if run.task_id == task_id],
             comments=[comment for comment in self.comments.values() if comment.task_id == task_id],
+            questions=sorted((question for question in self.questions.values() if question.task_id == task_id), key=lambda question: question.created_at),
             artifacts=[artifact for artifact in self.artifacts.values() if artifact.task_id == task_id],
             events=[event for event in self.events if event.task_id == task_id],
         )
@@ -288,6 +294,66 @@ class OrchestratorKernel:
         self._save()
         return run
 
+    def ask_question_from_run(self, run_id: str, body: str, resolves_block: bool = True, block_reason: str | None = None) -> Question:
+        run = self._run(run_id)
+        if run.status not in {RunStatus.LEASED, RunStatus.RUNNING}:
+            raise InvalidTransitionError(f"cannot ask question from terminal run: {run_id}")
+        task = self._task(run.task_id)
+        now = utc_now()
+        reason = block_reason or body
+        question = Question(task_id=task.id, run_id=run.id, asked_by=run.runner_id, body=body, resolves_block=resolves_block, created_at=now)
+        self.questions[question.id] = question
+        self.comments[str(uuid4())] = Comment(task_id=task.id, author=run.runner_id, body=body, created_at=now)
+        run.status = RunStatus.BLOCKED
+        run.summary = reason
+        run.finished_at = now
+        task.status = TaskStatus.BLOCKED
+        task.updated_at = now
+        self._event(
+            EventKind.QUESTION_ASKED,
+            "Question asked",
+            task_id=task.id,
+            run_id=run.id,
+            metadata={"question_id": question.id, "asked_by": run.runner_id, "resolves_block": resolves_block},
+        )
+        self._event(EventKind.BLOCKED, "Run blocked", task_id=task.id, run_id=run.id, metadata={"reason": reason})
+        self._save()
+        return question
+
+    def answer_question(
+        self,
+        task_id: str,
+        question_id: str,
+        body: str,
+        answered_by: str = "human",
+        unblock_if_resolved: bool = True,
+    ) -> Question:
+        task = self._task(task_id)
+        question = self._question(question_id)
+        if question.task_id != task.id:
+            raise InvalidTransitionError(f"question does not belong to task: {question_id}")
+        if question.status != QuestionStatus.OPEN:
+            raise InvalidTransitionError(f"question already answered: {question_id}")
+        now = utc_now()
+        question.status = QuestionStatus.ANSWERED
+        question.answer_body = body
+        question.answered_by = answered_by
+        question.answered_at = now
+        self.comments[str(uuid4())] = Comment(task_id=task.id, author=answered_by, body=body, created_at=now)
+        self._event(
+            EventKind.QUESTION_ANSWERED,
+            "Question answered",
+            task_id=task.id,
+            run_id=question.run_id,
+            metadata={"question_id": question.id, "answered_by": answered_by},
+        )
+        if unblock_if_resolved and question.resolves_block and task.status == TaskStatus.BLOCKED:
+            task.status = TaskStatus.READY if self._parents_done(task) else TaskStatus.TODO
+            task.updated_at = now
+            self._event(EventKind.READY, "Task unblocked", task_id=task.id, metadata={"question_id": question.id})
+        self._save()
+        return question
+
     def unblock_task(self, task_id: str) -> Task:
         task = self._task(task_id)
         if task.status != TaskStatus.BLOCKED:
@@ -344,6 +410,12 @@ class OrchestratorKernel:
             return self.runs[run_id]
         except KeyError as error:
             raise NotFoundError(f"run not found: {run_id}") from error
+
+    def _question(self, question_id: str) -> Question:
+        try:
+            return self.questions[question_id]
+        except KeyError as error:
+            raise NotFoundError(f"question not found: {question_id}") from error
 
     def _parents_done(self, task: Task) -> bool:
         return all(self.tasks[parent_id].status == TaskStatus.DONE for parent_id in task.parent_ids)

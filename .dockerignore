@@ -6,3 +6,5 @@ __pycache__
 *.pyc
 data
 .DS_Store
+web/node_modules
+web/dist

@@ -90,6 +90,53 @@ def test_runner_can_create_child_task_from_active_run() -> None:
     assert child.json()["parent_ids"] == [parent["id"]]
 
 
+def test_runner_question_blocks_task_and_answer_unblocks_it() -> None:
+    client = make_client()
+    endpoint = client.post("/api/v1/agent-endpoints", json={"name": "coder"}).json()
+    task = client.post("/api/v1/tasks", json={"title": "needs input", "agent_endpoint_id": endpoint["id"]}).json()
+    lease = client.post("/runner/v1/lease", json={"runner_id": "runner-1"}).json()
+
+    question_response = client.post(
+        f"/runner/v1/runs/{lease['run']['id']}/questions",
+        json={"body": "Which timeout should I use?", "resolves_block": True},
+    )
+    question = question_response.json()
+    blocked_detail = client.get(f"/api/v1/tasks/{task['id']}").json()
+    answer_response = client.post(
+        f"/api/v1/tasks/{task['id']}/questions/{question['id']}/answer",
+        json={"body": "Use 30 seconds.", "answered_by": "ryan"},
+    )
+    answered_detail = client.get(f"/api/v1/tasks/{task['id']}").json()
+
+    assert question_response.status_code == 200
+    assert question["status"] == "open"
+    assert blocked_detail["task"]["status"] == TaskStatus.BLOCKED
+    assert blocked_detail["questions"][0]["id"] == question["id"]
+    assert blocked_detail["comments"][0]["body"] == "Which timeout should I use?"
+    assert answer_response.status_code == 200
+    assert answer_response.json()["status"] == "answered"
+    assert answered_detail["task"]["status"] == TaskStatus.READY
+    assert answered_detail["questions"][0]["answer_body"] == "Use 30 seconds."
+    assert any(comment["body"] == "Use 30 seconds." for comment in answered_detail["comments"])
+
+
+def test_answering_non_task_question_is_rejected() -> None:
+    client = make_client()
+    endpoint = client.post("/api/v1/agent-endpoints", json={"name": "coder", "max_concurrency": 2}).json()
+    first = client.post("/api/v1/tasks", json={"title": "first", "agent_endpoint_id": endpoint["id"]}).json()
+    second = client.post("/api/v1/tasks", json={"title": "second", "agent_endpoint_id": endpoint["id"]}).json()
+    lease = client.post("/runner/v1/lease", json={"runner_id": "runner-1"}).json()
+    question = client.post(f"/runner/v1/runs/{lease['run']['id']}/questions", json={"body": "Question for first."}).json()
+
+    response = client.post(
+        f"/api/v1/tasks/{second['id']}/questions/{question['id']}/answer",
+        json={"body": "Wrong task."},
+    )
+
+    assert first["id"] != second["id"]
+    assert response.status_code == 400
+
+
 def test_api_blocks_and_unblocks_task() -> None:
     client = make_client()
     endpoint = client.post("/api/v1/agent-endpoints", json={"name": "coder"}).json()
@@ -109,4 +156,4 @@ def test_board_ui_is_served() -> None:
 
     assert response.status_code == 200
     assert "Kanban Agent Orchestrator" in response.text
-    assert "Create Task" in response.text
+    assert 'id="root"' in response.text

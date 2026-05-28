@@ -26,6 +26,11 @@ class RunStatus(StrEnum):
     BLOCKED = "blocked"
 
 
+class QuestionStatus(StrEnum):
+    OPEN = "open"
+    ANSWERED = "answered"
+
+
 class EventKind(StrEnum):
     CREATED = "created"
     READY = "ready"
@@ -38,6 +43,8 @@ class EventKind(StrEnum):
     ARTIFACT = "artifact"
     DEPENDENCY = "dependency"
     RECLAIMED = "reclaimed"
+    QUESTION_ASKED = "question_asked"
+    QUESTION_ANSWERED = "question_answered"
 
 
 class AgentEndpoint(BaseModel):
@@ -93,6 +100,20 @@ class Comment(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
 
 
+class Question(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    task_id: str
+    run_id: str | None = None
+    asked_by: str = "agent"
+    body: str
+    status: QuestionStatus = QuestionStatus.OPEN
+    resolves_block: bool = True
+    answer_body: str | None = None
+    answered_by: str | None = None
+    created_at: datetime = Field(default_factory=utc_now)
+    answered_at: datetime | None = None
+
+
 class Artifact(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     task_id: str
@@ -113,6 +134,7 @@ class TaskDetail(BaseModel):
     children: list[Task]
     runs: list[Run]
     comments: list[Comment]
+    questions: list[Question]
     artifacts: list[Artifact]
     events: list[Event]
 
@@ -123,5 +145,6 @@ class Snapshot(BaseModel):
     runs: list[Run] = Field(default_factory=list)
     events: list[Event] = Field(default_factory=list)
     comments: list[Comment] = Field(default_factory=list)
+    questions: list[Question] = Field(default_factory=list)
     artifacts: list[Artifact] = Field(default_factory=list)
     next_event_id: int = 1

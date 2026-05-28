@@ -4,9 +4,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from kanban_agent_orchestrator.app import create_app
-from kanban_agent_orchestrator.errors import DependencyCycleError
+from kanban_agent_orchestrator.errors import DependencyCycleError, InvalidTransitionError
 from kanban_agent_orchestrator.kernel import OrchestratorKernel
-from kanban_agent_orchestrator.models import RunStatus, TaskStatus
+from kanban_agent_orchestrator.models import QuestionStatus, Run, RunStatus, TaskStatus
 
 
 def test_dependency_gates_child_until_parent_is_done() -> None:
@@ -155,6 +155,80 @@ def test_running_agent_can_create_child_task_from_run() -> None:
     kernel.complete_run(lease.run.id)
 
     assert child.status == TaskStatus.READY
+
+
+def test_running_agent_can_ask_question_and_block_task() -> None:
+    kernel = OrchestratorKernel()
+    endpoint = kernel.create_agent_endpoint("coder")
+    task = kernel.create_task("needs input", endpoint.id)
+    lease = kernel.lease_next("coder-runner")
+    assert lease is not None
+
+    question = kernel.ask_question_from_run(lease.run.id, "Which timeout should I use?", block_reason="Need timeout decision")
+    detail = kernel.task_detail(task.id)
+
+    assert question.status == QuestionStatus.OPEN
+    assert question.task_id == task.id
+    assert question.run_id == lease.run.id
+    assert question.asked_by == "coder-runner"
+    assert task.status == TaskStatus.BLOCKED
+    assert lease.run.status == RunStatus.BLOCKED
+    assert detail.questions == [question]
+    assert any(comment.body == "Which timeout should I use?" and comment.author == "coder-runner" for comment in detail.comments)
+    assert any(event.kind == "question_asked" and event.metadata.get("question_id") == question.id for event in kernel.events)
+    assert any(event.kind == "blocked" and event.run_id == lease.run.id for event in kernel.events)
+
+
+def test_answered_question_unblocks_blocked_task() -> None:
+    kernel = OrchestratorKernel()
+    endpoint = kernel.create_agent_endpoint("coder")
+    task = kernel.create_task("needs input", endpoint.id)
+    lease = kernel.lease_next("coder-runner")
+    assert lease is not None
+    question = kernel.ask_question_from_run(lease.run.id, "Which timeout should I use?")
+
+    answered = kernel.answer_question(task.id, question.id, "Use 30 seconds.", answered_by="ryan")
+    detail = kernel.task_detail(task.id)
+
+    assert answered.status == QuestionStatus.ANSWERED
+    assert answered.answer_body == "Use 30 seconds."
+    assert answered.answered_by == "ryan"
+    assert answered.answered_at is not None
+    assert task.status == TaskStatus.READY
+    assert any(comment.body == "Use 30 seconds." and comment.author == "ryan" for comment in detail.comments)
+    assert any(event.kind == "question_answered" and event.metadata.get("question_id") == question.id for event in kernel.events)
+
+
+def test_answered_question_respects_dependencies_when_unblocking() -> None:
+    kernel = OrchestratorKernel()
+    endpoint = kernel.create_agent_endpoint("coder", max_concurrency=2)
+    parent = kernel.create_task("parent", endpoint.id)
+    child = kernel.create_task("child", endpoint.id, parent_ids=[parent.id])
+    parent_lease = kernel.lease_next("parent-runner")
+    assert parent_lease is not None
+    assert parent_lease.task.id == parent.id
+    child.status = TaskStatus.RUNNING
+    child_run = Run(task_id=child.id, runner_id="child-runner", agent_endpoint_id=endpoint.id)
+    kernel.runs[child_run.id] = child_run
+    question = kernel.ask_question_from_run(child_run.id, "Should I wait for parent?")
+
+    kernel.answer_question(child.id, question.id, "Yes.")
+
+    assert child.status == TaskStatus.TODO
+
+
+def test_question_cannot_be_answered_twice() -> None:
+    kernel = OrchestratorKernel()
+    endpoint = kernel.create_agent_endpoint("coder")
+    task = kernel.create_task("needs input", endpoint.id)
+    lease = kernel.lease_next("coder-runner")
+    assert lease is not None
+    question = kernel.ask_question_from_run(lease.run.id, "Which timeout should I use?")
+
+    kernel.answer_question(task.id, question.id, "Use 30 seconds.")
+
+    with pytest.raises(InvalidTransitionError):
+        kernel.answer_question(task.id, question.id, "Actually, 60.")
 
 
 def test_fastapi_minimal_lease_flow() -> None:

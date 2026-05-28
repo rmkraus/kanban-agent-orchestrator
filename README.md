@@ -2,20 +2,20 @@
 
 Kanban-first central orchestrator for remote/OpenAI-compatible agent runners.
 
-This is a deployable MVP: a durable API service, a built-in web board, runner lease endpoints, task lifecycle tracking, comments, markdown artifacts, and event audit trail. It is intentionally small and boring. Distributed orchestration is already cursed; no need to add interpretive dance.
+This is a deployable MVP: a durable API service, a built-in React board, runner lease endpoints, task lifecycle tracking, comments, structured questions, markdown artifacts, and event audit trail. It is intentionally small and boring. Distributed orchestration is already cursed; no need to add interpretive dance.
 
 ## Features
 
 - Durable JSON-backed state by default.
 - Agent endpoints with per-endpoint max concurrency.
 - Tasks with priorities, dependency DAGs, and exclusive execution.
-- Runner leases with heartbeat, finish, fail, block, and expired lease reclaim.
-- Comments and markdown artifacts per task.
+- Runner leases with heartbeat, finish, fail, block, question, and expired lease reclaim.
+- Comments, structured questions, and markdown artifacts per task.
 - Append-only event log.
-- Built-in web UI at `/`.
+- Built-in React web UI at `/`.
 - OpenAPI docs at `/docs`.
 - Dockerfile and Compose for local deployment.
-- Pytest, Black, Ruff, and GitHub Actions CI.
+- Pytest, Black, Ruff, Prettier, ESLint, TypeScript, and GitHub Actions CI.
 
 ## Quick start
 
@@ -53,6 +53,7 @@ Human/operator API:
 - `POST /api/v1/agent-tasks` — agent-friendly creation by assignee name, with optional parent/dependency IDs.
 - `GET /api/v1/tasks/{task_id}`
 - `POST /api/v1/tasks/{task_id}/unblock`
+- `POST /api/v1/tasks/{task_id}/questions/{question_id}/answer` — answer a blocked agent question and optionally unblock the task.
 - `POST /api/v1/tasks/{task_id}/comments`
 - `POST /api/v1/tasks/{task_id}/artifacts`
 - `POST /api/v1/dependencies`
@@ -63,6 +64,7 @@ Runner API:
 - `POST /runner/v1/lease`
 - `POST /runner/v1/runs/{run_id}/heartbeat`
 - `POST /runner/v1/runs/{run_id}/tasks` — create follow-up tasks from an active run.
+- `POST /runner/v1/runs/{run_id}/questions` — ask a task-chat question and block the run/task until answered.
 - `POST /runner/v1/runs/{run_id}/finish`
 - `POST /runner/v1/runs/{run_id}/fail`
 - `POST /runner/v1/runs/{run_id}/block`
@@ -79,12 +81,39 @@ curl -s -X POST http://127.0.0.1:8080/runner/v1/lease \
   -d '{"runner_id":"runner-1"}'
 ```
 
+## Blocking questions
+
+Agents can ask a question and block their current task in one call:
+
+```bash
+curl -s -X POST http://127.0.0.1:8080/runner/v1/runs/$RUN_ID/questions \
+  -H 'content-type: application/json' \
+  -d '{"body":"Which API timeout should I use?","resolves_block":true}'
+```
+
+That creates a structured question, adds it to the task chat, marks the run `blocked`, and marks the task `blocked`.
+
+Answering the question can resolve the block:
+
+```bash
+curl -s -X POST http://127.0.0.1:8080/api/v1/tasks/$TASK_ID/questions/$QUESTION_ID/answer \
+  -H 'content-type: application/json' \
+  -d '{"body":"Use 30 seconds.","answered_by":"ryan"}'
+```
+
+If the question has `resolves_block=true`, the task returns to `ready` or `todo` depending on parent dependencies. The blocked run stays terminal; a future lease picks the task back up with the answered context in task detail.
+
 ## Development checks
 
 ```bash
 uv run black --check .
 uv run ruff check .
 uv run pytest
+npm ci --prefix web
+npm run format:check --prefix web
+npm run lint --prefix web
+npm run typecheck --prefix web
+npm run build --prefix web
 ```
 
 ## Current product limits
