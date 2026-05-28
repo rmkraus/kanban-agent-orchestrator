@@ -56,6 +56,7 @@ export function App() {
   const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
   const [isRunnersOpen, setIsRunnersOpen] = useState(false);
   const [isBackendsOpen, setIsBackendsOpen] = useState(false);
+  const [isMainMenuOpen, setIsMainMenuOpen] = useState(false);
 
   const selectedTask = useMemo(() => snapshot?.tasks.find((task) => task.id === selectedTaskId) ?? null, [snapshot, selectedTaskId]);
 
@@ -103,22 +104,52 @@ export function App() {
           <h1>Kanban</h1>
         </div>
         <div className="topbar-actions">
-          {stats && (
-            <div className="stats-strip">
-              <span>{stats.total_tasks} tasks</span>
-              <span>{stats.active_runs} running</span>
-              <span>{stats.blocked_tasks} blocked</span>
+          <button className="secondary menu-button" type="button" aria-expanded={isMainMenuOpen} onClick={() => setIsMainMenuOpen((open) => !open)}>
+            Menu
+          </button>
+          {isMainMenuOpen && (
+            <div className="main-menu" role="menu">
+              {stats && (
+                <div className="stats-strip" aria-label="Board status">
+                  <span>{stats.total_tasks} tasks</span>
+                  <span>{stats.active_runs} running</span>
+                  <span>{stats.blocked_tasks} blocked</span>
+                </div>
+              )}
+              <button
+                className="secondary"
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setIsMainMenuOpen(false);
+                  setIsRunnersOpen(true);
+                }}
+              >
+                Runners
+              </button>
+              <button
+                className="secondary"
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setIsMainMenuOpen(false);
+                  setIsBackendsOpen(true);
+                }}
+              >
+                Backends
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setIsMainMenuOpen(false);
+                  setIsCreateTaskOpen(true);
+                }}
+              >
+                Create task
+              </button>
             </div>
           )}
-          <button className="secondary" type="button" onClick={() => setIsRunnersOpen(true)}>
-            Runners
-          </button>
-          <button className="secondary" type="button" onClick={() => setIsBackendsOpen(true)}>
-            Backends
-          </button>
-          <button type="button" onClick={() => setIsCreateTaskOpen(true)}>
-            Create task
-          </button>
         </div>
       </header>
 
