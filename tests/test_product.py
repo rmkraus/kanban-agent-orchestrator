@@ -51,6 +51,45 @@ def test_api_lifecycle_comments_artifacts_and_events() -> None:
     assert any(event["kind"] == "completed" for event in events)
 
 
+def test_agent_task_api_creates_task_by_assignee_and_dependencies() -> None:
+    client = make_client()
+    reviewer = client.post("/api/v1/agent-endpoints", json={"name": "reviewer"}).json()
+    client.post("/api/v1/agent-endpoints", json={"name": "coder"}).json()
+    parent = client.post("/api/v1/tasks", json={"title": "review", "agent_endpoint_id": reviewer["id"]}).json()
+
+    child = client.post(
+        "/api/v1/agent-tasks",
+        json={
+            "title": "fix review finding",
+            "assignee": "coder",
+            "body": "Follow-up from review.",
+            "parent_id": parent["id"],
+            "created_by": "reviewer-agent",
+        },
+    )
+    detail = client.get(f"/api/v1/tasks/{parent['id']}").json()
+
+    assert child.status_code == 200
+    assert child.json()["parent_ids"] == [parent["id"]]
+    assert detail["children"][0]["id"] == child.json()["id"]
+
+
+def test_runner_can_create_child_task_from_active_run() -> None:
+    client = make_client()
+    reviewer = client.post("/api/v1/agent-endpoints", json={"name": "reviewer"}).json()
+    client.post("/api/v1/agent-endpoints", json={"name": "coder"}).json()
+    parent = client.post("/api/v1/tasks", json={"title": "review", "agent_endpoint_id": reviewer["id"]}).json()
+    lease = client.post("/runner/v1/lease", json={"runner_id": "reviewer-runner"}).json()
+
+    child = client.post(
+        f"/runner/v1/runs/{lease['run']['id']}/tasks",
+        json={"title": "fix review finding", "assignee": "coder", "body": "Created by active run."},
+    )
+
+    assert child.status_code == 200
+    assert child.json()["parent_ids"] == [parent["id"]]
+
+
 def test_api_blocks_and_unblocks_task() -> None:
     client = make_client()
     endpoint = client.post("/api/v1/agent-endpoints", json={"name": "coder"}).json()

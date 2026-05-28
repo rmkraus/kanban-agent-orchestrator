@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from kanban_agent_orchestrator.errors import NotFoundError, OrchestratorError
 from kanban_agent_orchestrator.kernel import OrchestratorKernel
@@ -19,6 +19,29 @@ class TaskCreate(BaseModel):
     body: str = ""
     priority: int = 0
     exclusive: bool = False
+    parent_ids: list[str] = Field(default_factory=list)
+    created_by: str = "system"
+
+
+class AgentTaskCreate(BaseModel):
+    title: str
+    assignee: str
+    body: str = ""
+    priority: int = 0
+    exclusive: bool = False
+    parent_id: str | None = None
+    dependency_ids: list[str] = Field(default_factory=list)
+    created_by: str = "agent"
+
+
+class RunTaskCreate(BaseModel):
+    title: str
+    assignee: str
+    body: str = ""
+    priority: int = 0
+    exclusive: bool = False
+    parent_current_task: bool = True
+    dependency_ids: list[str] = Field(default_factory=list)
 
 
 class DependencyCreate(BaseModel):
@@ -128,6 +151,24 @@ def create_app(kernel: OrchestratorKernel | None = None) -> FastAPI:
                 body=payload.body,
                 priority=payload.priority,
                 exclusive=payload.exclusive,
+                parent_ids=payload.parent_ids,
+                created_by=payload.created_by,
+            )
+        except OrchestratorError as error:
+            raise domain_error(error) from error
+
+    @app.post("/api/v1/agent-tasks", response_model=Task)
+    def create_agent_task(payload: AgentTaskCreate) -> Task:
+        try:
+            return active_kernel.create_task_for_agent(
+                title=payload.title,
+                assignee=payload.assignee,
+                body=payload.body,
+                priority=payload.priority,
+                exclusive=payload.exclusive,
+                parent_id=payload.parent_id,
+                dependency_ids=payload.dependency_ids,
+                created_by=payload.created_by,
             )
         except OrchestratorError as error:
             raise domain_error(error) from error
@@ -205,6 +246,22 @@ def create_app(kernel: OrchestratorKernel | None = None) -> FastAPI:
     def block_run(run_id: str, payload: RunBlockRequest) -> Run:
         try:
             return active_kernel.block_run(run_id=run_id, reason=payload.reason)
+        except OrchestratorError as error:
+            raise domain_error(error) from error
+
+    @app.post("/runner/v1/runs/{run_id}/tasks", response_model=Task)
+    def create_task_from_run(run_id: str, payload: RunTaskCreate) -> Task:
+        try:
+            return active_kernel.create_task_from_run(
+                run_id=run_id,
+                title=payload.title,
+                assignee=payload.assignee,
+                body=payload.body,
+                priority=payload.priority,
+                exclusive=payload.exclusive,
+                parent_current_task=payload.parent_current_task,
+                dependency_ids=payload.dependency_ids,
+            )
         except OrchestratorError as error:
             raise domain_error(error) from error
 
