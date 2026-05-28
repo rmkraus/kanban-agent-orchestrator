@@ -99,57 +99,69 @@ export function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div className="topbar-actions">
-          <button className="secondary menu-button" type="button" aria-expanded={isMainMenuOpen} onClick={() => setIsMainMenuOpen((open) => !open)}>
-            Menu
-          </button>
-          {isMainMenuOpen && (
-            <div className="main-menu" role="menu">
-              {stats && (
-                <div className="stats-strip" aria-label="Board status">
-                  <span>{stats.total_tasks} tasks</span>
-                  <span>{stats.active_runs} running</span>
-                  <span>{stats.blocked_tasks} blocked</span>
+        <div className="title-block">
+          <div className="eyebrow">Agent orchestration</div>
+          <div className="title-row">
+            <div className="topbar-actions">
+              <button
+                className="secondary menu-button"
+                type="button"
+                aria-label="Open menu"
+                aria-expanded={isMainMenuOpen}
+                onClick={() => setIsMainMenuOpen((open) => !open)}
+              >
+                <span className="hamburger-icon" aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
+                </span>
+              </button>
+              {isMainMenuOpen && (
+                <div className="main-menu" role="menu">
+                  {stats && (
+                    <div className="stats-strip" aria-label="Board status">
+                      <span>{stats.total_tasks} tasks</span>
+                      <span>{stats.active_runs} running</span>
+                      <span>{stats.blocked_tasks} blocked</span>
+                    </div>
+                  )}
+                  <button
+                    className="secondary"
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setIsMainMenuOpen(false);
+                      setIsRunnersOpen(true);
+                    }}
+                  >
+                    Runners
+                  </button>
+                  <button
+                    className="secondary"
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setIsMainMenuOpen(false);
+                      setIsBackendsOpen(true);
+                    }}
+                  >
+                    Backends
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setIsMainMenuOpen(false);
+                      setIsCreateTaskOpen(true);
+                    }}
+                  >
+                    Create task
+                  </button>
                 </div>
               )}
-              <button
-                className="secondary"
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setIsMainMenuOpen(false);
-                  setIsRunnersOpen(true);
-                }}
-              >
-                Runners
-              </button>
-              <button
-                className="secondary"
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setIsMainMenuOpen(false);
-                  setIsBackendsOpen(true);
-                }}
-              >
-                Backends
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setIsMainMenuOpen(false);
-                  setIsCreateTaskOpen(true);
-                }}
-              >
-                Create task
-              </button>
             </div>
-          )}
-        </div>
-        <div>
-          <div className="eyebrow">Agent orchestration</div>
-          <h1>Kanban</h1>
+            <h1>Kanban</h1>
+          </div>
         </div>
       </header>
 

@@ -80,10 +80,16 @@ h3 {
 }
 
 .topbar-actions,
-.stats-strip {
+.stats-strip,
+.title-row {
   display: flex;
   align-items: center;
   gap: 12px;
+}
+
+.title-block {
+  display: grid;
+  gap: 4px;
 }
 
 .topbar-actions {
@@ -93,7 +99,25 @@ h3 {
 }
 
 .menu-button {
-  min-width: 92px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+}
+
+.hamburger-icon {
+  display: grid;
+  width: 18px;
+  gap: 4px;
+}
+
+.hamburger-icon span {
+  display: block;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
 }
 
 .main-menu {
