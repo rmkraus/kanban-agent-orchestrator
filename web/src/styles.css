@@ -17,8 +17,15 @@
   box-sizing: border-box;
 }
 
+html,
 body {
+  height: 100%;
   margin: 0;
+  overflow: hidden;
+}
+
+#root {
+  height: 100%;
 }
 
 button,
@@ -34,11 +41,15 @@ button {
 }
 
 .app-shell {
-  min-height: 100vh;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100dvh;
+  overflow: hidden;
   background: radial-gradient(circle at top left, rgba(40, 93, 89, 0.08), transparent 34rem), #f4f1ec;
 }
 
 .topbar {
+  flex: none;
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -159,6 +170,8 @@ h3 {
   display: grid;
   grid-template-columns: 280px minmax(520px, 1fr);
   gap: 18px;
+  min-height: 0;
+  overflow: hidden;
   padding: 20px;
 }
 
@@ -344,14 +357,22 @@ button:disabled {
   display: grid;
   grid-template-columns: repeat(5, minmax(190px, 1fr));
   gap: 12px;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
   overflow-x: auto;
+  overflow-y: hidden;
   padding-bottom: 4px;
   scroll-snap-type: x proximity;
   -webkit-overflow-scrolling: touch;
 }
 
 .column {
-  min-height: calc(100vh - 145px);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  max-height: 100%;
   padding: 12px;
   scroll-snap-align: start;
 }
@@ -363,7 +384,14 @@ button:disabled {
 
 .cards {
   display: grid;
+  flex: 1;
+  align-content: start;
+  align-items: start;
   gap: 10px;
+  grid-auto-rows: max-content;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 2px;
 }
 
 .task-card {
@@ -642,7 +670,7 @@ dd {
   }
 
   .column {
-    min-height: min(72vh, 680px);
+    min-height: 0;
   }
 
   .task-card {
