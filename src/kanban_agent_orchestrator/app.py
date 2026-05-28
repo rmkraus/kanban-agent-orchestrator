@@ -225,6 +225,13 @@ def create_public_app(kernel: OrchestratorKernel | None = None) -> FastAPI:
         except OrchestratorError as error:
             raise domain_error(error) from error
 
+    @app.delete("/api/v1/runners/{runner_id}", status_code=204)
+    def delete_runner(runner_id: str) -> None:
+        try:
+            active_kernel.delete_runner(runner_id=runner_id)
+        except OrchestratorError as error:
+            raise domain_error(error) from error
+
     @app.get("/api/v1/agent-endpoints", response_model=list[AgentEndpoint])
     def list_agent_endpoints() -> list[AgentEndpoint]:
         return active_kernel.list_agent_endpoints()

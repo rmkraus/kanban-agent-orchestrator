@@ -11,6 +11,9 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (!response.ok) {
     throw new Error(await response.text());
   }
+  if (response.status === 204) {
+    return undefined as T;
+  }
   return response.json() as Promise<T>;
 }
 
@@ -32,6 +35,10 @@ export function createRunner(payload: { name: string; enabled?: boolean }): Prom
 
 export function updateRunner(runnerId: string, payload: { name?: string; enabled?: boolean }): Promise<Runner> {
   return request<Runner>(`/api/v1/runners/${runnerId}`, { method: "PATCH", body: JSON.stringify(payload) });
+}
+
+export function deleteRunner(runnerId: string): Promise<void> {
+  return request<void>(`/api/v1/runners/${runnerId}`, { method: "DELETE" });
 }
 
 export function createEndpoint(payload: { name: string; max_concurrency: number; enabled?: boolean; runner_id?: string | null }): Promise<AgentEndpoint> {

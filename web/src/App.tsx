@@ -1,6 +1,18 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
-import { addComment, createEndpoint, createRunner, createTask, getSnapshot, getStats, getTaskDetail, unblockTask, updateEndpoint, updateRunner } from "./api";
+import {
+  addComment,
+  createEndpoint,
+  createRunner,
+  createTask,
+  deleteRunner,
+  getSnapshot,
+  getStats,
+  getTaskDetail,
+  unblockTask,
+  updateEndpoint,
+  updateRunner,
+} from "./api";
 import type { AgentEndpoint, BoardStats, Runner, RunnerCreateResult, Snapshot, Task, TaskDetail, TaskStatus } from "./types";
 
 const statuses: TaskStatus[] = ["todo", "ready", "running", "blocked", "done"];
@@ -182,6 +194,13 @@ function RunnersModal({ runners, onChange, onClose }: { runners: Runner[]; onCha
     onChange();
   }
 
+  async function removeRunner(runner: Runner) {
+    if (!window.confirm(`Delete runner "${runner.name}"? Backends assigned to it will be disabled and unassigned.`)) return;
+    await deleteRunner(runner.id);
+    if (created?.runner.id === runner.id) setCreated(null);
+    onChange();
+  }
+
   const origin = runnerOrigin();
   const unitName = safeUnitName(created?.runner.name ?? "runner");
   const foregroundCommand = created ? `KANBAN_PSK='${created.psk}' kanban-runner run --server '${origin}' --runner-id '${created.runner.id}'` : "";
@@ -238,13 +257,18 @@ function RunnersModal({ runners, onChange, onClose }: { runners: Runner[]; onCha
                 <strong>{runner.name}</strong>
                 <small>Last seen: {formatDate(runner.last_seen_at)}</small>
               </div>
-              <button
-                className={runner.enabled ? "secondary" : ""}
-                type="button"
-                onClick={() => void updateRunner(runner.id, { enabled: !runner.enabled }).then(onChange)}
-              >
-                {runner.enabled ? "Disable" : "Enable"}
-              </button>
+              <div className="row-actions">
+                <button
+                  className={runner.enabled ? "secondary" : ""}
+                  type="button"
+                  onClick={() => void updateRunner(runner.id, { enabled: !runner.enabled }).then(onChange)}
+                >
+                  {runner.enabled ? "Disable" : "Enable"}
+                </button>
+                <button className="danger" type="button" onClick={() => void removeRunner(runner)}>
+                  Delete
+                </button>
+              </div>
             </div>
           ))}
           {runners.length === 0 && <p className="muted">No runners yet. Create one to get the install command.</p>}

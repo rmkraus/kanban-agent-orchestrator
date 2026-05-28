@@ -51,6 +51,7 @@ Human/operator API:
 - `GET /api/v1/runners`
 - `POST /api/v1/runners` — returns the raw runner PSK once; only the hash is stored.
 - `PATCH /api/v1/runners/{runner_id}`
+- `DELETE /api/v1/runners/{runner_id}` — deletes the runner if it has no active run; assigned backends are disabled and unassigned.
 - `GET /api/v1/agent-endpoints`
 - `POST /api/v1/agent-endpoints`
 - `PATCH /api/v1/agent-endpoints/{endpoint_id}`

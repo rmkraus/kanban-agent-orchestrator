@@ -239,6 +239,16 @@ button:disabled {
   background: #f6f2ea;
 }
 
+.danger {
+  border: 1px solid #f1b8ad;
+  background: #fff1ee;
+  color: #9f2d20;
+}
+
+.danger:hover {
+  background: #ffe4df;
+}
+
 .full-width {
   width: 100%;
 }

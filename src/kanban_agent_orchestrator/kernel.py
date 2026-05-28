@@ -81,6 +81,28 @@ class OrchestratorKernel:
         self._save()
         return self._public_runner(runner)
 
+    def delete_runner(self, runner_id: str, now: datetime | None = None) -> None:
+        now = now or utc_now()
+        runner = self._runner(runner_id)
+        active_runs = [
+            run for run in self.runs.values() if run.runner_id == runner_id and run.status in {RunStatus.LEASED, RunStatus.RUNNING} and run.leased_until > now
+        ]
+        if active_runs:
+            raise InvalidTransitionError(f"cannot delete runner with active runs: {runner_id}")
+
+        disabled_backend_ids = []
+        for endpoint in self.agent_endpoints.values():
+            if endpoint.runner_id == runner_id:
+                endpoint.enabled = False
+                endpoint.runner_id = None
+                disabled_backend_ids.append(endpoint.id)
+
+        del self.runners[runner.id]
+        self._event(
+            EventKind.DELETED, f"Runner deleted: {runner.name}", metadata={"runner_id": runner.id, "disabled_backend_ids": ",".join(disabled_backend_ids)}
+        )
+        self._save()
+
     def create_agent_endpoint(self, name: str, max_concurrency: int = 1, enabled: bool = True, runner_id: str | None = None) -> AgentEndpoint:
         if runner_id is not None:
             self._runner(runner_id)

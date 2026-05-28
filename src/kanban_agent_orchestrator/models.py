@@ -43,6 +43,7 @@ class EventKind(StrEnum):
     ARTIFACT = "artifact"
     DEPENDENCY = "dependency"
     RECLAIMED = "reclaimed"
+    DELETED = "deleted"
     QUESTION_ASKED = "question_asked"
     QUESTION_ANSWERED = "question_answered"
 

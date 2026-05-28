@@ -294,6 +294,42 @@ def test_runner_registration_psk_and_assigned_backend_lease_flow() -> None:
     assert snapshot["runners"][0]["last_seen_at"] is not None
 
 
+def test_delete_runner_unassigns_and_disables_backends() -> None:
+    client = TestClient(create_app(OrchestratorKernel()))
+
+    runner_result = client.post("/api/v1/runners", json={"name": "jetson"}).json()
+    runner = runner_result["runner"]
+    backend = client.post("/api/v1/agent-endpoints", json={"name": "coder", "runner_id": runner["id"], "max_concurrency": 1}).json()
+
+    response = client.delete(f"/api/v1/runners/{runner['id']}")
+    snapshot = client.get("/api/v1/snapshot").json()
+
+    assert response.status_code == 204
+    assert snapshot["runners"] == []
+    assert snapshot["agent_endpoints"][0]["id"] == backend["id"]
+    assert snapshot["agent_endpoints"][0]["runner_id"] is None
+    assert snapshot["agent_endpoints"][0]["enabled"] is False
+    assert snapshot["events"][-1]["kind"] == "deleted"
+
+
+def test_delete_runner_with_active_run_is_rejected() -> None:
+    client = TestClient(create_app(OrchestratorKernel()))
+
+    runner_result = client.post("/api/v1/runners", json={"name": "jetson"}).json()
+    runner = runner_result["runner"]
+    psk = runner_result["psk"]
+    backend = client.post("/api/v1/agent-endpoints", json={"name": "coder", "runner_id": runner["id"], "max_concurrency": 1}).json()
+    client.post("/api/v1/tasks", json={"title": "task", "agent_endpoint_id": backend["id"]}).json()
+    lease = client.post("/runner/v1/lease", headers={"Authorization": f"Bearer {psk}"}, json={"runner_id": runner["id"]})
+
+    response = client.delete(f"/api/v1/runners/{runner['id']}")
+    snapshot = client.get("/api/v1/snapshot").json()
+
+    assert lease.status_code == 200
+    assert response.status_code == 400
+    assert snapshot["runners"][0]["id"] == runner["id"]
+
+
 def test_runner_run_actions_require_registered_runner_psk() -> None:
     client = TestClient(create_app(OrchestratorKernel()))
 
