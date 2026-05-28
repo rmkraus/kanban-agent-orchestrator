@@ -247,3 +247,49 @@ def test_fastapi_minimal_lease_flow() -> None:
     payload = lease_response.json()
     assert payload["task"]["id"] == task_id
     assert payload["run"]["runner_id"] == "runner-1"
+
+
+def test_runner_registration_psk_and_assigned_backend_lease_flow() -> None:
+    client = TestClient(create_app(OrchestratorKernel()))
+
+    runner_result = client.post("/api/v1/runners", json={"name": "jetson"}).json()
+    runner = runner_result["runner"]
+    psk = runner_result["psk"]
+    backend = client.post("/api/v1/agent-endpoints", json={"name": "coder", "runner_id": runner["id"], "max_concurrency": 1}).json()
+    task = client.post("/api/v1/tasks", json={"title": "task", "agent_endpoint_id": backend["id"]}).json()
+
+    unauthenticated = client.post("/runner/v1/lease", json={"runner_id": runner["id"]})
+    wrong_psk = client.post("/runner/v1/lease", headers={"Authorization": "Bearer wrong"}, json={"runner_id": runner["id"]})
+    after_wrong_psk = client.get("/api/v1/snapshot").json()
+    lease = client.post("/runner/v1/lease", headers={"Authorization": f"Bearer {psk}"}, json={"runner_id": runner["id"]})
+    snapshot = client.get("/api/v1/snapshot").json()
+
+    assert psk.startswith("kanban_rnr_")
+    assert "psk_hash" not in runner
+    assert unauthenticated.json() is None
+    assert wrong_psk.status_code == 400
+    assert after_wrong_psk["runners"][0]["last_seen_at"] is None
+    assert lease.status_code == 200
+    assert lease.json()["task"]["id"] == task["id"]
+    assert snapshot["runners"][0]["last_seen_at"] is not None
+
+
+def test_runner_run_actions_require_registered_runner_psk() -> None:
+    client = TestClient(create_app(OrchestratorKernel()))
+
+    runner_result = client.post("/api/v1/runners", json={"name": "jetson"}).json()
+    runner = runner_result["runner"]
+    psk = runner_result["psk"]
+    backend = client.post("/api/v1/agent-endpoints", json={"name": "coder", "runner_id": runner["id"], "max_concurrency": 1}).json()
+    client.post("/api/v1/tasks", json={"title": "task", "agent_endpoint_id": backend["id"]}).json()
+    lease = client.post("/runner/v1/lease", headers={"Authorization": f"Bearer {psk}"}, json={"runner_id": runner["id"]}).json()
+    run_id = lease["run"]["id"]
+
+    unauthenticated = client.post(f"/runner/v1/runs/{run_id}/heartbeat", json={})
+    wrong_psk = client.post(f"/runner/v1/runs/{run_id}/heartbeat", headers={"Authorization": "Bearer wrong"}, json={})
+    valid = client.post(f"/runner/v1/runs/{run_id}/heartbeat", headers={"Authorization": f"Bearer {psk}"}, json={})
+
+    assert unauthenticated.status_code == 400
+    assert wrong_psk.status_code == 400
+    assert valid.status_code == 200
+    assert valid.json()["id"] == run_id

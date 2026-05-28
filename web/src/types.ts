@@ -2,12 +2,26 @@ export type TaskStatus = "todo" | "ready" | "running" | "blocked" | "done" | "ar
 export type RunStatus = "leased" | "running" | "completed" | "failed" | "blocked";
 export type QuestionStatus = "open" | "answered";
 
+export interface Runner {
+  id: string;
+  name: string;
+  enabled: boolean;
+  created_at: string;
+  last_seen_at: string | null;
+}
+
+export interface RunnerCreateResult {
+  runner: Runner;
+  psk: string;
+}
+
 export interface AgentEndpoint {
   id: string;
   name: string;
   max_concurrency: number;
   enabled: boolean;
   created_at: string;
+  runner_id: string | null;
 }
 
 export interface Task {
@@ -79,6 +93,7 @@ export interface Event {
 }
 
 export interface Snapshot {
+  runners: Runner[];
   agent_endpoints: AgentEndpoint[];
   tasks: Task[];
   runs: Run[];

@@ -1,3 +1,6 @@
+import hashlib
+import hmac
+import secrets
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
@@ -13,6 +16,9 @@ from kanban_agent_orchestrator.models import (
     Question,
     QuestionStatus,
     Run,
+    Runner,
+    RunnerCreateResult,
+    RunnerPublic,
     RunStatus,
     Snapshot,
     Task,
@@ -28,6 +34,7 @@ class OrchestratorKernel:
         self.store = store
         self.persist = persist
         snapshot = store.load() if store is not None else Snapshot()
+        self.runners: dict[str, Runner] = {runner.id: runner for runner in snapshot.runners}
         self.agent_endpoints: dict[str, AgentEndpoint] = {endpoint.id: endpoint for endpoint in snapshot.agent_endpoints}
         self.tasks: dict[str, Task] = {task.id: task for task in snapshot.tasks}
         self.runs: dict[str, Run] = {run.id: run for run in snapshot.runs}
@@ -43,6 +50,7 @@ class OrchestratorKernel:
 
     def snapshot(self) -> Snapshot:
         return Snapshot(
+            runners=list(self.runners.values()),
             agent_endpoints=list(self.agent_endpoints.values()),
             tasks=list(self.tasks.values()),
             runs=list(self.runs.values()),
@@ -53,10 +61,48 @@ class OrchestratorKernel:
             next_event_id=self.next_event_id,
         )
 
-    def create_agent_endpoint(self, name: str, max_concurrency: int = 1, enabled: bool = True) -> AgentEndpoint:
-        endpoint = AgentEndpoint(name=name, max_concurrency=max_concurrency, enabled=enabled)
+    def create_runner(self, name: str, enabled: bool = True) -> RunnerCreateResult:
+        psk = f"kanban_rnr_{secrets.token_urlsafe(32)}"
+        runner = Runner(name=name, psk_hash=self._hash_psk(psk), enabled=enabled)
+        self.runners[runner.id] = runner
+        self._event(EventKind.CREATED, f"Runner created: {name}", metadata={"runner_id": runner.id})
+        self._save()
+        return RunnerCreateResult(runner=self._public_runner(runner), psk=psk)
+
+    def list_runners(self) -> list[RunnerPublic]:
+        return [self._public_runner(runner) for runner in sorted(self.runners.values(), key=lambda runner: runner.created_at)]
+
+    def update_runner(self, runner_id: str, name: str | None = None, enabled: bool | None = None) -> RunnerPublic:
+        runner = self._runner(runner_id)
+        if name is not None:
+            runner.name = name
+        if enabled is not None:
+            runner.enabled = enabled
+        self._save()
+        return self._public_runner(runner)
+
+    def create_agent_endpoint(self, name: str, max_concurrency: int = 1, enabled: bool = True, runner_id: str | None = None) -> AgentEndpoint:
+        if runner_id is not None:
+            self._runner(runner_id)
+        endpoint = AgentEndpoint(name=name, max_concurrency=max_concurrency, enabled=enabled, runner_id=runner_id)
         self.agent_endpoints[endpoint.id] = endpoint
-        self._event(EventKind.CREATED, f"Agent endpoint created: {name}", metadata={"agent_endpoint_id": endpoint.id})
+        self._event(EventKind.CREATED, f"Backend created: {name}", metadata={"agent_endpoint_id": endpoint.id, "runner_id": runner_id})
+        self._save()
+        return endpoint
+
+    def update_agent_endpoint(
+        self, endpoint_id: str, name: str | None = None, max_concurrency: int | None = None, enabled: bool | None = None, runner_id: str | None = None
+    ) -> AgentEndpoint:
+        endpoint = self._agent_endpoint(endpoint_id)
+        if runner_id is not None:
+            self._runner(runner_id)
+            endpoint.runner_id = runner_id
+        if name is not None:
+            endpoint.name = name
+        if max_concurrency is not None:
+            endpoint.max_concurrency = max_concurrency
+        if enabled is not None:
+            endpoint.enabled = enabled
         self._save()
         return endpoint
 
@@ -74,8 +120,7 @@ class OrchestratorKernel:
         parent_ids: list[str] | None = None,
         created_by: str = "system",
     ) -> Task:
-        if agent_endpoint_id not in self.agent_endpoints:
-            raise NotFoundError(f"agent endpoint not found: {agent_endpoint_id}")
+        self._agent_endpoint(agent_endpoint_id)
         parents = []
         for parent_id in parent_ids or []:
             parent = self._task(parent_id)
@@ -200,8 +245,9 @@ class OrchestratorKernel:
                 if next_status == TaskStatus.READY:
                     self._event(EventKind.READY, "Task became ready", task_id=task.id)
 
-    def lease_next(self, runner_id: str, lease_seconds: int = 300, now: datetime | None = None) -> Lease | None:
+    def lease_next(self, runner_id: str, lease_seconds: int = 300, now: datetime | None = None, psk: str | None = None) -> Lease | None:
         now = now or datetime.now(UTC)
+        authenticated_runner = self.authenticate_runner(runner_id, psk, now) if psk is not None else None
         self.reclaim_expired_leases(now)
         self.recompute_readiness()
 
@@ -212,6 +258,10 @@ class OrchestratorKernel:
         for task in self._ready_tasks_by_priority():
             endpoint = self.agent_endpoints.get(task.agent_endpoint_id)
             if endpoint is None or not endpoint.enabled:
+                continue
+            if endpoint.runner_id is not None and authenticated_runner is None:
+                continue
+            if authenticated_runner is not None and endpoint.runner_id != authenticated_runner.id:
                 continue
             if self._active_run_count(endpoint.id, now) >= endpoint.max_concurrency:
                 continue
@@ -364,6 +414,25 @@ class OrchestratorKernel:
         self._save()
         return task
 
+    def authenticate_runner(self, runner_id: str, psk: str, now: datetime | None = None) -> Runner:
+        runner = self._runner(runner_id)
+        if not runner.enabled:
+            raise InvalidTransitionError(f"runner is disabled: {runner_id}")
+        if not hmac.compare_digest(runner.psk_hash, self._hash_psk(psk)):
+            raise InvalidTransitionError("runner authentication failed")
+        runner.last_seen_at = now or utc_now()
+        self._save()
+        return runner
+
+    def authenticate_run(self, run_id: str, psk: str | None, now: datetime | None = None) -> Run:
+        run = self._run(run_id)
+        if run.runner_id not in self.runners:
+            return run
+        if psk is None:
+            raise InvalidTransitionError("runner authentication failed")
+        self.authenticate_runner(run.runner_id, psk, now=now)
+        return run
+
     def add_comment(self, task_id: str, body: str, author: str = "system") -> Comment:
         self._task(task_id)
         comment = Comment(task_id=task_id, body=body, author=author)
@@ -398,6 +467,25 @@ class OrchestratorKernel:
         if reclaimed:
             self._save()
         return reclaimed
+
+    def _runner(self, runner_id: str) -> Runner:
+        try:
+            return self.runners[runner_id]
+        except KeyError as error:
+            raise NotFoundError(f"runner not found: {runner_id}") from error
+
+    def _public_runner(self, runner: Runner) -> RunnerPublic:
+        return RunnerPublic(id=runner.id, name=runner.name, enabled=runner.enabled, created_at=runner.created_at, last_seen_at=runner.last_seen_at)
+
+    @staticmethod
+    def _hash_psk(psk: str) -> str:
+        return hashlib.sha256(psk.encode("utf-8")).hexdigest()
+
+    def _agent_endpoint(self, endpoint_id: str) -> AgentEndpoint:
+        try:
+            return self.agent_endpoints[endpoint_id]
+        except KeyError as error:
+            raise NotFoundError(f"agent endpoint not found: {endpoint_id}") from error
 
     def _task(self, task_id: str) -> Task:
         try:

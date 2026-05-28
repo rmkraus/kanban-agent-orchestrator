@@ -1,21 +1,52 @@
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from kanban_agent_orchestrator.errors import NotFoundError, OrchestratorError
 from kanban_agent_orchestrator.kernel import OrchestratorKernel
-from kanban_agent_orchestrator.models import AgentEndpoint, Artifact, Comment, Event, Lease, Question, Run, Snapshot, Task, TaskDetail, TaskStatus
+from kanban_agent_orchestrator.models import (
+    AgentEndpoint,
+    Artifact,
+    Comment,
+    Event,
+    Lease,
+    Question,
+    Run,
+    RunnerCreateResult,
+    RunnerPublic,
+    Task,
+    TaskDetail,
+    TaskStatus,
+)
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+
+class RunnerCreate(BaseModel):
+    name: str
+    enabled: bool = True
+
+
+class RunnerUpdate(BaseModel):
+    name: str | None = None
+    enabled: bool | None = None
 
 
 class AgentEndpointCreate(BaseModel):
     name: str
     max_concurrency: int = 1
     enabled: bool = True
+    runner_id: str | None = None
+
+
+class AgentEndpointUpdate(BaseModel):
+    name: str | None = None
+    max_concurrency: int | None = None
+    enabled: bool | None = None
+    runner_id: str | None = None
 
 
 class TaskCreate(BaseModel):
@@ -106,9 +137,25 @@ class BoardStats(BaseModel):
     blocked_tasks: int
 
 
+class ApiSnapshot(BaseModel):
+    runners: list[RunnerPublic]
+    agent_endpoints: list[AgentEndpoint]
+    tasks: list[Task]
+    runs: list[Run]
+    events: list[Event]
+    comments: list[Comment]
+    questions: list[Question]
+    artifacts: list[Artifact]
+    next_event_id: int
+
+
 def domain_error(error: OrchestratorError) -> HTTPException:
     status_code = 404 if isinstance(error, NotFoundError) else 400
     return HTTPException(status_code=status_code, detail=str(error))
+
+
+def bearer_psk(authorization: str | None) -> str | None:
+    return authorization.removeprefix("Bearer ").strip() if authorization else None
 
 
 def create_app(kernel: OrchestratorKernel | None = None) -> FastAPI:
@@ -130,11 +177,22 @@ def create_app(kernel: OrchestratorKernel | None = None) -> FastAPI:
     def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/api/v1/snapshot", response_model=Snapshot)
-    def snapshot() -> Snapshot:
+    @app.get("/api/v1/snapshot", response_model=ApiSnapshot)
+    def snapshot() -> ApiSnapshot:
         active_kernel.reclaim_expired_leases()
         active_kernel.recompute_readiness()
-        return active_kernel.snapshot()
+        current = active_kernel.snapshot()
+        return ApiSnapshot(
+            runners=active_kernel.list_runners(),
+            agent_endpoints=current.agent_endpoints,
+            tasks=current.tasks,
+            runs=current.runs,
+            events=current.events,
+            comments=current.comments,
+            questions=current.questions,
+            artifacts=current.artifacts,
+            next_event_id=current.next_event_id,
+        )
 
     @app.get("/api/v1/stats", response_model=BoardStats)
     def stats() -> BoardStats:
@@ -152,13 +210,46 @@ def create_app(kernel: OrchestratorKernel | None = None) -> FastAPI:
             blocked_tasks=by_status[TaskStatus.BLOCKED.value],
         )
 
+    @app.get("/api/v1/runners", response_model=list[RunnerPublic])
+    def list_runners() -> list[RunnerPublic]:
+        return active_kernel.list_runners()
+
+    @app.post("/api/v1/runners", response_model=RunnerCreateResult)
+    def create_runner(payload: RunnerCreate) -> RunnerCreateResult:
+        return active_kernel.create_runner(name=payload.name, enabled=payload.enabled)
+
+    @app.patch("/api/v1/runners/{runner_id}", response_model=RunnerPublic)
+    def update_runner(runner_id: str, payload: RunnerUpdate) -> RunnerPublic:
+        try:
+            return active_kernel.update_runner(runner_id=runner_id, name=payload.name, enabled=payload.enabled)
+        except OrchestratorError as error:
+            raise domain_error(error) from error
+
     @app.get("/api/v1/agent-endpoints", response_model=list[AgentEndpoint])
     def list_agent_endpoints() -> list[AgentEndpoint]:
         return active_kernel.list_agent_endpoints()
 
     @app.post("/api/v1/agent-endpoints", response_model=AgentEndpoint)
     def create_agent_endpoint(payload: AgentEndpointCreate) -> AgentEndpoint:
-        return active_kernel.create_agent_endpoint(name=payload.name, max_concurrency=payload.max_concurrency, enabled=payload.enabled)
+        try:
+            return active_kernel.create_agent_endpoint(
+                name=payload.name, max_concurrency=payload.max_concurrency, enabled=payload.enabled, runner_id=payload.runner_id
+            )
+        except OrchestratorError as error:
+            raise domain_error(error) from error
+
+    @app.patch("/api/v1/agent-endpoints/{endpoint_id}", response_model=AgentEndpoint)
+    def update_agent_endpoint(endpoint_id: str, payload: AgentEndpointUpdate) -> AgentEndpoint:
+        try:
+            return active_kernel.update_agent_endpoint(
+                endpoint_id=endpoint_id,
+                name=payload.name,
+                max_concurrency=payload.max_concurrency,
+                enabled=payload.enabled,
+                runner_id=payload.runner_id,
+            )
+        except OrchestratorError as error:
+            raise domain_error(error) from error
 
     @app.get("/api/v1/tasks", response_model=list[Task])
     def list_tasks(status: TaskStatus | None = None) -> list[Task]:
@@ -255,40 +346,48 @@ def create_app(kernel: OrchestratorKernel | None = None) -> FastAPI:
         return active_kernel.list_events(since=since)
 
     @app.post("/runner/v1/lease", response_model=Lease | None)
-    def lease_next(payload: LeaseRequest) -> Lease | None:
-        return active_kernel.lease_next(runner_id=payload.runner_id, lease_seconds=payload.lease_seconds)
+    def lease_next(payload: LeaseRequest, authorization: str | None = Header(default=None)) -> Lease | None:
+        try:
+            return active_kernel.lease_next(runner_id=payload.runner_id, lease_seconds=payload.lease_seconds, psk=bearer_psk(authorization))
+        except OrchestratorError as error:
+            raise domain_error(error) from error
 
     @app.post("/runner/v1/runs/{run_id}/heartbeat", response_model=Run)
-    def heartbeat(run_id: str, payload: HeartbeatRequest) -> Run:
+    def heartbeat(run_id: str, payload: HeartbeatRequest, authorization: str | None = Header(default=None)) -> Run:
         try:
+            active_kernel.authenticate_run(run_id, bearer_psk(authorization))
             return active_kernel.heartbeat(run_id=run_id, lease_seconds=payload.lease_seconds)
         except OrchestratorError as error:
             raise domain_error(error) from error
 
     @app.post("/runner/v1/runs/{run_id}/finish", response_model=Run)
-    def finish_run(run_id: str, payload: RunFinishRequest) -> Run:
+    def finish_run(run_id: str, payload: RunFinishRequest, authorization: str | None = Header(default=None)) -> Run:
         try:
+            active_kernel.authenticate_run(run_id, bearer_psk(authorization))
             return active_kernel.complete_run(run_id=run_id, summary=payload.summary)
         except OrchestratorError as error:
             raise domain_error(error) from error
 
     @app.post("/runner/v1/runs/{run_id}/fail", response_model=Run)
-    def fail_run(run_id: str, payload: RunFailRequest) -> Run:
+    def fail_run(run_id: str, payload: RunFailRequest, authorization: str | None = Header(default=None)) -> Run:
         try:
+            active_kernel.authenticate_run(run_id, bearer_psk(authorization))
             return active_kernel.fail_run(run_id=run_id, summary=payload.summary)
         except OrchestratorError as error:
             raise domain_error(error) from error
 
     @app.post("/runner/v1/runs/{run_id}/block", response_model=Run)
-    def block_run(run_id: str, payload: RunBlockRequest) -> Run:
+    def block_run(run_id: str, payload: RunBlockRequest, authorization: str | None = Header(default=None)) -> Run:
         try:
+            active_kernel.authenticate_run(run_id, bearer_psk(authorization))
             return active_kernel.block_run(run_id=run_id, reason=payload.reason)
         except OrchestratorError as error:
             raise domain_error(error) from error
 
     @app.post("/runner/v1/runs/{run_id}/questions", response_model=Question)
-    def ask_question_from_run(run_id: str, payload: RunQuestionCreate) -> Question:
+    def ask_question_from_run(run_id: str, payload: RunQuestionCreate, authorization: str | None = Header(default=None)) -> Question:
         try:
+            active_kernel.authenticate_run(run_id, bearer_psk(authorization))
             return active_kernel.ask_question_from_run(
                 run_id=run_id,
                 body=payload.body,
@@ -299,8 +398,9 @@ def create_app(kernel: OrchestratorKernel | None = None) -> FastAPI:
             raise domain_error(error) from error
 
     @app.post("/runner/v1/runs/{run_id}/tasks", response_model=Task)
-    def create_task_from_run(run_id: str, payload: RunTaskCreate) -> Task:
+    def create_task_from_run(run_id: str, payload: RunTaskCreate, authorization: str | None = Header(default=None)) -> Task:
         try:
+            active_kernel.authenticate_run(run_id, bearer_psk(authorization))
             return active_kernel.create_task_from_run(
                 run_id=run_id,
                 title=payload.title,

@@ -47,12 +47,35 @@ class EventKind(StrEnum):
     QUESTION_ANSWERED = "question_answered"
 
 
+class Runner(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid4()))
+    name: str
+    psk_hash: str
+    enabled: bool = True
+    created_at: datetime = Field(default_factory=utc_now)
+    last_seen_at: datetime | None = None
+
+
+class RunnerPublic(BaseModel):
+    id: str
+    name: str
+    enabled: bool = True
+    created_at: datetime
+    last_seen_at: datetime | None = None
+
+
+class RunnerCreateResult(BaseModel):
+    runner: RunnerPublic
+    psk: str
+
+
 class AgentEndpoint(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     name: str
     max_concurrency: int = Field(ge=1, default=1)
     enabled: bool = True
     created_at: datetime = Field(default_factory=utc_now)
+    runner_id: str | None = None
 
 
 class Task(BaseModel):
@@ -140,6 +163,7 @@ class TaskDetail(BaseModel):
 
 
 class Snapshot(BaseModel):
+    runners: list[Runner] = Field(default_factory=list)
     agent_endpoints: list[AgentEndpoint] = Field(default_factory=list)
     tasks: list[Task] = Field(default_factory=list)
     runs: list[Run] = Field(default_factory=list)

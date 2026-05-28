@@ -12,6 +12,7 @@ dependencies = [
 
 [project.scripts]
 kanban-agent-orchestrator = "kanban_agent_orchestrator:main"
+kanban-runner = "kanban_agent_orchestrator.runner_cli:main"
 
 [dependency-groups]
 dev = [

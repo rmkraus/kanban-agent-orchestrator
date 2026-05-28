@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
-import { addComment, answerQuestion, createEndpoint, createTask, getSnapshot, getStats, getTaskDetail, unblockTask } from "./api";
-import type { AgentEndpoint, BoardStats, Snapshot, Task, TaskDetail, TaskStatus } from "./types";
+import { addComment, createEndpoint, createRunner, createTask, getSnapshot, getStats, getTaskDetail, unblockTask, updateEndpoint, updateRunner } from "./api";
+import type { AgentEndpoint, BoardStats, Runner, RunnerCreateResult, Snapshot, Task, TaskDetail, TaskStatus } from "./types";
 
 const statuses: TaskStatus[] = ["todo", "ready", "running", "blocked", "done"];
 
@@ -9,9 +9,27 @@ function endpointName(endpoints: AgentEndpoint[], id: string): string {
   return endpoints.find((endpoint) => endpoint.id === id)?.name ?? id.slice(0, 8);
 }
 
+function runnerName(runners: Runner[], id: string | null): string {
+  if (!id) return "Unassigned";
+  return runners.find((runner) => runner.id === id)?.name ?? id.slice(0, 8);
+}
+
 function formatDate(value: string | null): string {
   if (!value) return "—";
   return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(new Date(value));
+}
+
+function safeUnitName(name: string): string {
+  return `kanban-runner-${
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "runner"
+  }`;
+}
+
+function serverOrigin(): string {
+  return typeof window === "undefined" ? "http://127.0.0.1:8080" : window.location.origin;
 }
 
 export function App() {
@@ -20,24 +38,23 @@ export function App() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [detail, setDetail] = useState<TaskDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isCreateTaskOpen, setIsCreateTaskOpen] = useState(false);
+  const [isRunnersOpen, setIsRunnersOpen] = useState(false);
+  const [isBackendsOpen, setIsBackendsOpen] = useState(false);
 
   const selectedTask = useMemo(() => snapshot?.tasks.find((task) => task.id === selectedTaskId) ?? null, [snapshot, selectedTaskId]);
 
   async function refresh(nextSelectedTaskId = selectedTaskId) {
     setError(null);
-    setIsLoading(true);
     try {
       const [nextSnapshot, nextStats] = await Promise.all([getSnapshot(), getStats()]);
       setSnapshot(nextSnapshot);
       setStats(nextStats);
-      const taskId = nextSelectedTaskId ?? nextSnapshot.tasks[0]?.id ?? null;
+      const taskId = nextSelectedTaskId && nextSnapshot.tasks.some((task) => task.id === nextSelectedTaskId) ? nextSelectedTaskId : null;
       setSelectedTaskId(taskId);
       setDetail(taskId ? await getTaskDetail(taskId) : null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
-    } finally {
-      setIsLoading(false);
     }
   }
 
@@ -47,8 +64,10 @@ export function App() {
   }
 
   useEffect(() => {
-    void refresh(null);
-  }, []);
+    void refresh(selectedTaskId);
+    const intervalId = window.setInterval(() => void refresh(selectedTaskId), 3000);
+    return () => window.clearInterval(intervalId);
+  }, [selectedTaskId]);
 
   const tasksByStatus = useMemo(() => {
     const grouped = Object.fromEntries(statuses.map((status) => [status, [] as Task[]])) as Record<TaskStatus, Task[]>;
@@ -57,6 +76,9 @@ export function App() {
     }
     return grouped;
   }, [snapshot]);
+
+  const runners = snapshot?.runners ?? [];
+  const backends = snapshot?.agent_endpoints ?? [];
 
   return (
     <div className="app-shell">
@@ -73,20 +95,21 @@ export function App() {
               <span>{stats.blocked_tasks} blocked</span>
             </div>
           )}
-          <button className="secondary" onClick={() => void refresh()} disabled={isLoading}>
-            {isLoading ? "Refreshing" : "Refresh"}
+          <button className="secondary" type="button" onClick={() => setIsRunnersOpen(true)}>
+            Runners
+          </button>
+          <button className="secondary" type="button" onClick={() => setIsBackendsOpen(true)}>
+            Backends
+          </button>
+          <button type="button" onClick={() => setIsCreateTaskOpen(true)}>
+            Create task
           </button>
         </div>
       </header>
 
       {error && <div className="error-banner">{error}</div>}
 
-      <main className="workspace">
-        <aside className="sidebar">
-          <EndpointPanel endpoints={snapshot?.agent_endpoints ?? []} onChange={() => void refresh()} />
-          <CreateTaskPanel endpoints={snapshot?.agent_endpoints ?? []} onChange={(taskId) => void refresh(taskId)} />
-        </aside>
-
+      <main className="workspace board-only">
         <section className="board" aria-label="Task board">
           {statuses.map((status) => (
             <section className="column" key={status}>
@@ -102,15 +125,12 @@ export function App() {
                     onClick={() => void selectTask(task)}
                   >
                     <div className="card-title">{task.title}</div>
-                    <div className="card-meta">{endpointName(snapshot?.agent_endpoints ?? [], task.agent_endpoint_id)}</div>
+                    <div className="card-meta">{endpointName(backends, task.agent_endpoint_id)}</div>
                     {task.body && <p>{task.body}</p>}
                     <div className="badges">
                       <span>p{task.priority}</span>
                       <span>{task.parent_ids.length} parents</span>
                       <span>{task.child_ids.length} children</span>
-                      {snapshot?.questions.some((question) => question.task_id === task.id && question.status === "open") && (
-                        <span className="blocked-badge">question</span>
-                      )}
                     </div>
                   </button>
                 ))}
@@ -118,62 +138,236 @@ export function App() {
             </section>
           ))}
         </section>
-
-        <TaskPanel detail={detail} selectedTask={selectedTask} endpoints={snapshot?.agent_endpoints ?? []} onChange={() => void refresh(selectedTaskId)} />
       </main>
+
+      <TaskPanel
+        detail={detail}
+        selectedTask={selectedTask}
+        endpoints={backends}
+        onChange={() => void refresh(selectedTaskId)}
+        onClose={() => {
+          setSelectedTaskId(null);
+          setDetail(null);
+        }}
+      />
+      {isCreateTaskOpen && (
+        <CreateTaskModal
+          endpoints={backends}
+          onClose={() => setIsCreateTaskOpen(false)}
+          onChange={(taskId) => {
+            setIsCreateTaskOpen(false);
+            void refresh(taskId);
+          }}
+        />
+      )}
+      {isRunnersOpen && <RunnersModal runners={runners} onClose={() => setIsRunnersOpen(false)} onChange={() => void refresh()} />}
+      {isBackendsOpen && <BackendsModal endpoints={backends} runners={runners} onClose={() => setIsBackendsOpen(false)} onChange={() => void refresh()} />}
     </div>
   );
 }
 
-function EndpointPanel({ endpoints, onChange }: { endpoints: AgentEndpoint[]; onChange: () => void }) {
+function RunnersModal({ runners, onChange, onClose }: { runners: Runner[]; onChange: () => void; onClose: () => void }) {
   const [name, setName] = useState("");
-  const [maxConcurrency, setMaxConcurrency] = useState(1);
+  const [created, setCreated] = useState<RunnerCreateResult | null>(null);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (!name.trim()) return;
-    await createEndpoint({ name: name.trim(), max_concurrency: maxConcurrency });
+    const result = await createRunner({ name: name.trim() });
+    setCreated(result);
     setName("");
     onChange();
   }
 
+  const origin = serverOrigin();
+  const unitName = safeUnitName(created?.runner.name ?? "runner");
+  const foregroundCommand = created ? `KANBAN_PSK='${created.psk}' kanban-runner run --server '${origin}' --runner-id '${created.runner.id}'` : "";
+  const systemdCommand = created
+    ? `printf '%s' '${created.psk}' | sudo kanban-runner install-systemd --server '${origin}' --runner-id '${created.runner.id}' --name '${unitName}' --psk-stdin`
+    : "";
+
   return (
-    <section className="panel">
-      <div className="panel-heading">
-        <h2>Endpoints</h2>
-        <span>{endpoints.length}</span>
-      </div>
-      <div className="endpoint-list">
-        {endpoints.map((endpoint) => (
-          <div className="endpoint-row" key={endpoint.id}>
-            <span>{endpoint.name}</span>
-            <small>{endpoint.max_concurrency} max</small>
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <section
+        className="detail-panel admin-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="runners-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="detail-header">
+          <div>
+            <div className="eyebrow">Remote workers</div>
+            <h2 id="runners-title">Runners</h2>
           </div>
-        ))}
-      </div>
-      <form onSubmit={(event) => void submit(event)} className="stacked-form">
-        <label>
-          Name
-          <input value={name} onChange={(event) => setName(event.target.value)} placeholder="coder" />
-        </label>
-        <label>
-          Max concurrency
-          <input type="number" min="1" value={maxConcurrency} onChange={(event) => setMaxConcurrency(Number(event.target.value || 1))} />
-        </label>
-        <button type="submit">Create endpoint</button>
-      </form>
-    </section>
+          <button className="icon-button" type="button" aria-label="Close runners" onClick={onClose}>
+            ×
+          </button>
+        </div>
+
+        <form onSubmit={(event) => void submit(event)} className="inline-form">
+          <label>
+            Runner name
+            <input value={name} onChange={(event) => setName(event.target.value)} placeholder="jetson" />
+          </label>
+          <button type="submit">Create runner</button>
+        </form>
+
+        {created && (
+          <section className="command-card">
+            <h3>Copy/paste registration</h3>
+            <p className="muted">The PSK is shown once. Save this command now or rotate later. Security theater avoided, barely.</p>
+            <label>
+              Foreground test
+              <textarea readOnly rows={3} value={foregroundCommand} />
+            </label>
+            <label>
+              Install as systemd service
+              <textarea readOnly rows={4} value={systemdCommand} />
+            </label>
+          </section>
+        )}
+
+        <div className="admin-list">
+          {runners.map((runner) => (
+            <div className="admin-row" key={runner.id}>
+              <div>
+                <strong>{runner.name}</strong>
+                <small>Last seen: {formatDate(runner.last_seen_at)}</small>
+              </div>
+              <button
+                className={runner.enabled ? "secondary" : ""}
+                type="button"
+                onClick={() => void updateRunner(runner.id, { enabled: !runner.enabled }).then(onChange)}
+              >
+                {runner.enabled ? "Disable" : "Enable"}
+              </button>
+            </div>
+          ))}
+          {runners.length === 0 && <p className="muted">No runners yet. Create one to get the install command.</p>}
+        </div>
+      </section>
+    </div>
   );
 }
 
-function CreateTaskPanel({ endpoints, onChange }: { endpoints: AgentEndpoint[]; onChange: (taskId: string) => void }) {
+function BackendsModal({
+  endpoints,
+  runners,
+  onChange,
+  onClose,
+}: {
+  endpoints: AgentEndpoint[];
+  runners: Runner[];
+  onChange: () => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [runnerId, setRunnerId] = useState("");
+  const [maxConcurrency, setMaxConcurrency] = useState(1);
+  const activeRunnerId = runnerId || runners[0]?.id || "";
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!name.trim() || !activeRunnerId) return;
+    await createEndpoint({ name: name.trim(), max_concurrency: maxConcurrency, runner_id: activeRunnerId });
+    setName("");
+    setMaxConcurrency(1);
+    onChange();
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <section
+        className="detail-panel admin-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="backends-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="detail-header">
+          <div>
+            <div className="eyebrow">Task targets</div>
+            <h2 id="backends-title">Backends</h2>
+          </div>
+          <button className="icon-button" type="button" aria-label="Close backends" onClick={onClose}>
+            ×
+          </button>
+        </div>
+
+        <form onSubmit={(event) => void submit(event)} className="stacked-form task-form">
+          <label>
+            Backend name
+            <input value={name} onChange={(event) => setName(event.target.value)} placeholder="coder" />
+          </label>
+          <label>
+            Runner
+            <select value={activeRunnerId} onChange={(event) => setRunnerId(event.target.value)} disabled={runners.length === 0}>
+              {runners.map((runner) => (
+                <option value={runner.id} key={runner.id}>
+                  {runner.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Max concurrency
+            <input type="number" min="1" value={maxConcurrency} onChange={(event) => setMaxConcurrency(Number(event.target.value || 1))} />
+          </label>
+          <button type="submit" disabled={!activeRunnerId}>
+            Create backend
+          </button>
+        </form>
+
+        <div className="admin-list">
+          {endpoints.map((endpoint) => (
+            <div className="admin-row" key={endpoint.id}>
+              <div>
+                <strong>{endpoint.name}</strong>
+                <small>
+                  {runnerName(runners, endpoint.runner_id)} · {endpoint.max_concurrency} max
+                </small>
+              </div>
+              <div className="row-actions">
+                <select
+                  value={endpoint.runner_id ?? ""}
+                  onChange={(event) => void updateEndpoint(endpoint.id, { runner_id: event.target.value }).then(onChange)}
+                >
+                  <option value="" disabled>
+                    Assign runner
+                  </option>
+                  {runners.map((runner) => (
+                    <option value={runner.id} key={runner.id}>
+                      {runner.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  className={endpoint.enabled ? "secondary" : ""}
+                  type="button"
+                  onClick={() => void updateEndpoint(endpoint.id, { enabled: !endpoint.enabled }).then(onChange)}
+                >
+                  {endpoint.enabled ? "Disable" : "Enable"}
+                </button>
+              </div>
+            </div>
+          ))}
+          {endpoints.length === 0 && <p className="muted">No backends yet. Create a runner first, then attach a backend to it.</p>}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function CreateTaskModal({ endpoints, onChange, onClose }: { endpoints: AgentEndpoint[]; onChange: (taskId: string) => void; onClose: () => void }) {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
   const [endpointId, setEndpointId] = useState("");
   const [priority, setPriority] = useState(0);
   const [exclusive, setExclusive] = useState(false);
 
-  const activeEndpointId = endpointId || endpoints[0]?.id || "";
+  const enabledEndpoints = endpoints.filter((endpoint) => endpoint.enabled && endpoint.runner_id);
+  const activeEndpointId = endpointId || enabledEndpoints[0]?.id || "";
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -187,41 +381,55 @@ function CreateTaskPanel({ endpoints, onChange }: { endpoints: AgentEndpoint[]; 
   }
 
   return (
-    <section className="panel">
-      <div className="panel-heading">
-        <h2>Create Task</h2>
-      </div>
-      <form onSubmit={(event) => void submit(event)} className="stacked-form">
-        <label>
-          Endpoint
-          <select value={activeEndpointId} onChange={(event) => setEndpointId(event.target.value)}>
-            {endpoints.map((endpoint) => (
-              <option value={endpoint.id} key={endpoint.id}>
-                {endpoint.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          Title
-          <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Ship useful work" />
-        </label>
-        <label>
-          Body
-          <textarea value={body} onChange={(event) => setBody(event.target.value)} rows={4} />
-        </label>
-        <label>
-          Priority
-          <input type="number" value={priority} onChange={(event) => setPriority(Number(event.target.value || 0))} />
-        </label>
-        <label className="checkbox-row">
-          <input type="checkbox" checked={exclusive} onChange={(event) => setExclusive(event.target.checked)} /> Exclusive
-        </label>
-        <button type="submit" disabled={!activeEndpointId}>
-          Create task
-        </button>
-      </form>
-    </section>
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <section
+        className="detail-panel task-form-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="create-task-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="detail-header">
+          <div>
+            <div className="eyebrow">New work item</div>
+            <h2 id="create-task-title">Create Task</h2>
+          </div>
+          <button className="icon-button" type="button" aria-label="Close create task" onClick={onClose}>
+            ×
+          </button>
+        </div>
+        <form onSubmit={(event) => void submit(event)} className="stacked-form task-form">
+          <label>
+            Backend
+            <select value={activeEndpointId} onChange={(event) => setEndpointId(event.target.value)} disabled={enabledEndpoints.length === 0}>
+              {enabledEndpoints.map((endpoint) => (
+                <option value={endpoint.id} key={endpoint.id}>
+                  {endpoint.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Title
+            <input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Ship useful work" />
+          </label>
+          <label>
+            Body
+            <textarea value={body} onChange={(event) => setBody(event.target.value)} rows={4} />
+          </label>
+          <label>
+            Priority
+            <input type="number" value={priority} onChange={(event) => setPriority(Number(event.target.value || 0))} />
+          </label>
+          <label className="checkbox-row">
+            <input type="checkbox" checked={exclusive} onChange={(event) => setExclusive(event.target.checked)} /> Exclusive
+          </label>
+          <button type="submit" disabled={!activeEndpointId}>
+            Create task
+          </button>
+        </form>
+      </section>
+    </div>
   );
 }
 
@@ -230,21 +438,18 @@ function TaskPanel({
   selectedTask,
   endpoints,
   onChange,
+  onClose,
 }: {
   detail: TaskDetail | null;
   selectedTask: Task | null;
   endpoints: AgentEndpoint[];
   onChange: () => void;
+  onClose: () => void;
 }) {
   const [comment, setComment] = useState("");
-  const [answerByQuestion, setAnswerByQuestion] = useState<Record<string, string>>({});
 
   if (!selectedTask || !detail) {
-    return (
-      <aside className="detail-panel empty">
-        <p>Select a task to inspect the thread.</p>
-      </aside>
-    );
+    return null;
   }
 
   async function submitComment(event: FormEvent) {
@@ -255,98 +460,67 @@ function TaskPanel({
     onChange();
   }
 
-  async function submitAnswer(questionId: string) {
-    const body = answerByQuestion[questionId]?.trim();
-    if (!body || !selectedTask) return;
-    await answerQuestion(selectedTask.id, questionId, { body, answered_by: "human", unblock_if_resolved: true });
-    setAnswerByQuestion((answers) => ({ ...answers, [questionId]: "" }));
-    onChange();
-  }
-
   return (
-    <aside className="detail-panel">
-      <div className="detail-header">
-        <div>
-          <div className="eyebrow">{endpointName(endpoints, selectedTask.agent_endpoint_id)}</div>
-          <h2>{selectedTask.title}</h2>
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <aside className="detail-panel" role="dialog" aria-modal="true" aria-labelledby="task-detail-title" onClick={(event) => event.stopPropagation()}>
+        <div className="detail-header">
+          <div>
+            <div className="eyebrow">{endpointName(endpoints, selectedTask.agent_endpoint_id)}</div>
+            <h2 id="task-detail-title">{selectedTask.title}</h2>
+          </div>
+          <div className="detail-actions">
+            <span className={`status-pill ${selectedTask.status}`}>{selectedTask.status}</span>
+            <button className="icon-button" type="button" aria-label="Close task detail" onClick={onClose}>
+              ×
+            </button>
+          </div>
         </div>
-        <span className={`status-pill ${selectedTask.status}`}>{selectedTask.status}</span>
-      </div>
-      {selectedTask.body && <p className="task-body">{selectedTask.body}</p>}
+        {selectedTask.body && <p className="task-body">{selectedTask.body}</p>}
 
-      <dl className="meta-grid">
-        <div>
-          <dt>Priority</dt>
-          <dd>{selectedTask.priority}</dd>
-        </div>
-        <div>
-          <dt>Updated</dt>
-          <dd>{formatDate(selectedTask.updated_at)}</dd>
-        </div>
-        <div>
-          <dt>Parents</dt>
-          <dd>{detail.parents.length}</dd>
-        </div>
-        <div>
-          <dt>Children</dt>
-          <dd>{detail.children.length}</dd>
-        </div>
-      </dl>
+        <dl className="meta-grid">
+          <div>
+            <dt>Priority</dt>
+            <dd>{selectedTask.priority}</dd>
+          </div>
+          <div>
+            <dt>Updated</dt>
+            <dd>{formatDate(selectedTask.updated_at)}</dd>
+          </div>
+          <div>
+            <dt>Parents</dt>
+            <dd>{detail.parents.length}</dd>
+          </div>
+          <div>
+            <dt>Children</dt>
+            <dd>{detail.children.length}</dd>
+          </div>
+        </dl>
 
-      {selectedTask.status === "blocked" && (
-        <button className="secondary full-width" onClick={() => void unblockTask(selectedTask.id).then(onChange)}>
-          Unblock manually
-        </button>
-      )}
+        {selectedTask.status === "blocked" && (
+          <button className="secondary full-width" onClick={() => void unblockTask(selectedTask.id).then(onChange)}>
+            Unblock manually
+          </button>
+        )}
 
-      <section className="thread-section">
-        <h3>Questions</h3>
-        {detail.questions.length === 0 && <p className="muted">No questions yet.</p>}
-        {detail.questions.map((question) => (
-          <article className="question" key={question.id}>
-            <div className="question-topline">
-              <strong>{question.asked_by}</strong>
-              <span className={`status-pill small ${question.status}`}>{question.status}</span>
-            </div>
-            <p>{question.body}</p>
-            {question.answer_body ? (
-              <div className="answer-box">
-                <strong>{question.answered_by}</strong>
-                <p>{question.answer_body}</p>
-              </div>
-            ) : (
-              <div className="answer-form">
-                <textarea
-                  value={answerByQuestion[question.id] ?? ""}
-                  onChange={(event) => setAnswerByQuestion((answers) => ({ ...answers, [question.id]: event.target.value }))}
-                  placeholder="Answer and resolve…"
-                  rows={3}
-                />
-                <button onClick={() => void submitAnswer(question.id)}>Answer</button>
-              </div>
-            )}
-          </article>
-        ))}
-      </section>
-
-      <section className="thread-section">
-        <h3>Chat</h3>
-        <div className="comments">
-          {detail.comments.map((entry) => (
-            <article className="comment" key={entry.id}>
-              <div>
-                <strong>{entry.author}</strong>
-                <span>{formatDate(entry.created_at)}</span>
-              </div>
-              <p>{entry.body}</p>
-            </article>
-          ))}
-        </div>
-        <form onSubmit={(event) => void submitComment(event)} className="comment-form">
-          <textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={3} placeholder="Add a task note…" />
-          <button type="submit">Send</button>
-        </form>
-      </section>
-    </aside>
+        <section className="thread-section">
+          <h3>Chat</h3>
+          <div className="comments">
+            {detail.comments.map((entry) => (
+              <article className="comment" key={entry.id}>
+                <div>
+                  <strong>{entry.author}</strong>
+                  <span>{formatDate(entry.created_at)}</span>
+                </div>
+                <p>{entry.body}</p>
+              </article>
+            ))}
+          </div>
+          <form onSubmit={(event) => void submitComment(event)} className="comment-form">
+            <textarea value={comment} onChange={(event) => setComment(event.target.value)} rows={3} placeholder="Add a task note…" />
+            <button type="submit">Send</button>
+          </form>
+        </section>
+      </aside>
+    </div>
   );
 }

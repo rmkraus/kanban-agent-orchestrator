@@ -7,9 +7,10 @@ This is a deployable MVP: a durable API service, a built-in React board, runner 
 ## Features
 
 - Durable JSON-backed state by default.
-- Agent endpoints with per-endpoint max concurrency.
+- Registered runners with one-time PSKs and `last_seen_at` heartbeat tracking.
+- Backends with per-backend max concurrency and optional runner assignment.
 - Tasks with priorities, dependency DAGs, and exclusive execution.
-- Runner leases with heartbeat, finish, fail, block, question, and expired lease reclaim.
+- Authenticated runner leases with heartbeat, finish, fail, block, question, and expired lease reclaim.
 - Comments, structured questions, and markdown artifacts per task.
 - Append-only event log.
 - Built-in React web UI at `/`.
@@ -46,8 +47,12 @@ Human/operator API:
 
 - `GET /api/v1/snapshot`
 - `GET /api/v1/stats`
+- `GET /api/v1/runners`
+- `POST /api/v1/runners` — returns the raw runner PSK once; only the hash is stored.
+- `PATCH /api/v1/runners/{runner_id}`
 - `GET /api/v1/agent-endpoints`
 - `POST /api/v1/agent-endpoints`
+- `PATCH /api/v1/agent-endpoints/{endpoint_id}`
 - `GET /api/v1/tasks`
 - `POST /api/v1/tasks`
 - `POST /api/v1/agent-tasks` — agent-friendly creation by assignee name, with optional parent/dependency IDs.
@@ -69,16 +74,41 @@ Runner API:
 - `POST /runner/v1/runs/{run_id}/fail`
 - `POST /runner/v1/runs/{run_id}/block`
 
+## Runner install flow
+
+Create a runner, then store its one-time PSK in a root-readable env file for the systemd service. Do not put the PSK in `ExecStart`; process args are not a vault, despite their strong confidence.
+
+```bash
+# 1. Create a runner. Save the returned `runner.id` and `psk` locally.
+curl -s -X POST http://127.0.0.1:8080/api/v1/runners \
+  -H 'content-type: application/json' \
+  -d '{"name":"spark-0"}'
+
+# 2. Install the persistent runner service. Pass the PSK on stdin.
+printf '%s' "$KANBAN_RUNNER_PSK" | sudo kanban-runner install-systemd \
+  --server http://127.0.0.1:8080 \
+  --runner-id "$KANBAN_RUNNER_ID" \
+  --name kanban-runner-spark-0 \
+  --psk-stdin
+```
+
+Runner lease and run-control calls use `Authorization: Bearer <runner-psk>`. Invalid PSKs are rejected and do not update `last_seen_at`.
+
 ## Example runner flow
 
 ```bash
+curl -s -X POST http://127.0.0.1:8080/api/v1/runners \
+  -H 'content-type: application/json' \
+  -d '{"name":"local-runner"}'
+
 curl -s -X POST http://127.0.0.1:8080/api/v1/agent-endpoints \
   -H 'content-type: application/json' \
-  -d '{"name":"coder","max_concurrency":1}'
+  -d '{"name":"coder","max_concurrency":1,"runner_id":"'$KANBAN_RUNNER_ID'"}'
 
 curl -s -X POST http://127.0.0.1:8080/runner/v1/lease \
   -H 'content-type: application/json' \
-  -d '{"runner_id":"runner-1"}'
+  -H "authorization: Bearer $KANBAN_RUNNER_PSK" \
+  -d '{"runner_id":"'$KANBAN_RUNNER_ID'"}'
 ```
 
 ## Blocking questions

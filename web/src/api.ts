@@ -1,4 +1,4 @@
-import type { AgentEndpoint, BoardStats, Comment, Question, Snapshot, Task, TaskDetail } from "./types";
+import type { AgentEndpoint, BoardStats, Comment, Runner, RunnerCreateResult, Snapshot, Task, TaskDetail } from "./types";
 
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(path, {
@@ -26,8 +26,23 @@ export function getTaskDetail(taskId: string): Promise<TaskDetail> {
   return request<TaskDetail>(`/api/v1/tasks/${taskId}`);
 }
 
-export function createEndpoint(payload: { name: string; max_concurrency: number; enabled?: boolean }): Promise<AgentEndpoint> {
+export function createRunner(payload: { name: string; enabled?: boolean }): Promise<RunnerCreateResult> {
+  return request<RunnerCreateResult>("/api/v1/runners", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function updateRunner(runnerId: string, payload: { name?: string; enabled?: boolean }): Promise<Runner> {
+  return request<Runner>(`/api/v1/runners/${runnerId}`, { method: "PATCH", body: JSON.stringify(payload) });
+}
+
+export function createEndpoint(payload: { name: string; max_concurrency: number; enabled?: boolean; runner_id?: string | null }): Promise<AgentEndpoint> {
   return request<AgentEndpoint>("/api/v1/agent-endpoints", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function updateEndpoint(
+  endpointId: string,
+  payload: { name?: string; max_concurrency?: number; enabled?: boolean; runner_id?: string | null },
+): Promise<AgentEndpoint> {
+  return request<AgentEndpoint>(`/api/v1/agent-endpoints/${endpointId}`, { method: "PATCH", body: JSON.stringify(payload) });
 }
 
 export function createTask(payload: { title: string; body: string; agent_endpoint_id: string; priority: number; exclusive: boolean }): Promise<Task> {
@@ -36,14 +51,6 @@ export function createTask(payload: { title: string; body: string; agent_endpoin
 
 export function addComment(taskId: string, payload: { body: string; author: string }): Promise<Comment> {
   return request<Comment>(`/api/v1/tasks/${taskId}/comments`, { method: "POST", body: JSON.stringify(payload) });
-}
-
-export function answerQuestion(
-  taskId: string,
-  questionId: string,
-  payload: { body: string; answered_by: string; unblock_if_resolved: boolean },
-): Promise<Question> {
-  return request<Question>(`/api/v1/tasks/${taskId}/questions/${questionId}/answer`, { method: "POST", body: JSON.stringify(payload) });
 }
 
 export function unblockTask(taskId: string): Promise<Task> {
