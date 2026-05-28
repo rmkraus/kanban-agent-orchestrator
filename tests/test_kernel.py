@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 
-from kanban_agent_orchestrator.app import create_app
+from kanban_agent_orchestrator.app import create_app, create_public_app, create_runner_app
 from kanban_agent_orchestrator.errors import DependencyCycleError, InvalidTransitionError
 from kanban_agent_orchestrator.kernel import OrchestratorKernel
 from kanban_agent_orchestrator.models import QuestionStatus, Run, RunStatus, TaskStatus
@@ -247,6 +247,26 @@ def test_fastapi_minimal_lease_flow() -> None:
     payload = lease_response.json()
     assert payload["task"]["id"] == task_id
     assert payload["run"]["runner_id"] == "runner-1"
+
+
+def test_public_and_runner_api_surfaces_are_split() -> None:
+    kernel = OrchestratorKernel()
+    public_client = TestClient(create_public_app(kernel))
+    runner_client = TestClient(create_runner_app(kernel))
+
+    endpoint = public_client.post("/api/v1/agent-endpoints", json={"name": "coder", "max_concurrency": 1}).json()
+    task = public_client.post("/api/v1/tasks", json={"title": "task", "agent_endpoint_id": endpoint["id"]}).json()
+
+    public_runner_response = public_client.post("/runner/v1/lease", json={"runner_id": "runner-1"})
+    runner_public_response = runner_client.get("/api/v1/snapshot")
+    runner_docs_response = runner_client.get("/docs")
+    lease_response = runner_client.post("/runner/v1/lease", json={"runner_id": "runner-1"})
+
+    assert public_runner_response.status_code == 404
+    assert runner_public_response.status_code == 404
+    assert runner_docs_response.status_code == 404
+    assert lease_response.status_code == 200
+    assert lease_response.json()["task"]["id"] == task["id"]
 
 
 def test_runner_registration_psk_and_assigned_backend_lease_flow() -> None:

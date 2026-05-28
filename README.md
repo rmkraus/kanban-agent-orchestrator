@@ -22,14 +22,15 @@ This is a deployable MVP: a durable API service, a built-in React board, runner 
 
 ```bash
 uv sync --dev
-uv run kanban-agent-orchestrator --host 127.0.0.1 --port 8080
+uv run kanban-agent-orchestrator --host 127.0.0.1 --port 8080 --runner-port 8082
 ```
 
 Open:
 
-- Board: http://127.0.0.1:8080/
+- Public API/UI: http://127.0.0.1:8080/
+- Runner API: http://127.0.0.1:8082/
 - API docs: http://127.0.0.1:8080/docs
-- Health: http://127.0.0.1:8080/healthz
+- Health: http://127.0.0.1:8080/healthz and http://127.0.0.1:8082/healthz
 
 State is stored at `./data/orchestrator.json` unless `KANBAN_ORCHESTRATOR_DB` is set.
 
@@ -64,7 +65,9 @@ Human/operator API:
 - `POST /api/v1/dependencies`
 - `GET /api/v1/events`
 
-Runner API:
+## Runner-only API
+
+Runner endpoints are served on the runner-only port, `8082` by default, so the public UI/API port can sit behind basic auth, OAuth, or whatever bouncer you hire. The runner port exposes only `/healthz` and `/runner/v1/*`; it does not serve the frontend, public `/api/v1/*`, or API docs.
 
 - `POST /runner/v1/lease`
 - `POST /runner/v1/runs/{run_id}/heartbeat`
@@ -86,13 +89,13 @@ curl -s -X POST http://127.0.0.1:8080/api/v1/runners \
 
 # 2. Install the persistent runner service. Pass the PSK on stdin.
 printf '%s' "$KANBAN_RUNNER_PSK" | sudo kanban-runner install-systemd \
-  --server http://127.0.0.1:8080 \
+  --server http://127.0.0.1:8082 \
   --runner-id "$KANBAN_RUNNER_ID" \
   --name kanban-runner-spark-0 \
   --psk-stdin
 ```
 
-Runner lease and run-control calls use `Authorization: Bearer <runner-psk>`. Invalid PSKs are rejected and do not update `last_seen_at`.
+Runner lease and run-control calls use the runner-only port and `Authorization: Bearer <runner-psk>`. Invalid PSKs are rejected and do not update `last_seen_at`.
 
 ## Example runner flow
 
@@ -105,9 +108,9 @@ curl -s -X POST http://127.0.0.1:8080/api/v1/agent-endpoints \
   -H 'content-type: application/json' \
   -d '{"name":"coder","max_concurrency":1,"runner_id":"'$KANBAN_RUNNER_ID'"}'
 
-curl -s -X POST http://127.0.0.1:8080/runner/v1/lease \
+curl -s -X POST http://127.0.0.1:8082/runner/v1/lease \
   -H 'content-type: application/json' \
-  -H "authorization: Bearer $KANBAN_RUNNER_PSK" \
+-H "authorization: Bearer $KANBAN_RUNNER_PSK"
   -d '{"runner_id":"'$KANBAN_RUNNER_ID'"}'
 ```
 
@@ -116,8 +119,9 @@ curl -s -X POST http://127.0.0.1:8080/runner/v1/lease \
 Agents can ask a question and block their current task in one call:
 
 ```bash
-curl -s -X POST http://127.0.0.1:8080/runner/v1/runs/$RUN_ID/questions \
+curl -s -X POST http://127.0.0.1:8082/runner/v1/runs/$RUN_ID/questions \
   -H 'content-type: application/json' \
+-H "authorization: Bearer $KANBAN_RUNNER_PSK"
   -d '{"body":"Which API timeout should I use?","resolves_block":true}'
 ```
 
@@ -150,4 +154,4 @@ npm run build --prefix web
 
 - JSON persistence is fine for one service process. Use Postgres before running multiple API replicas.
 - No auth yet. Put it behind a trusted network/proxy before inviting the internet to your task board buffet.
-- Runner implementation is an API contract, not a full OpenAI-compatible executor yet.
+- Runner implementation is an API contract plus a minimal polling CLI, not a full OpenAI-compatible executor yet.

@@ -117,7 +117,7 @@ def main() -> None:
     subcommands = parser.add_subparsers(dest="command", required=True)
 
     run_parser = subcommands.add_parser("run", help="Run the polling runner")
-    run_parser.add_argument("--server", default=os.environ.get("KANBAN_SERVER", "http://127.0.0.1:8080"))
+    run_parser.add_argument("--server", default=os.environ.get("KANBAN_SERVER", "http://127.0.0.1:8082"))
     run_parser.add_argument("--runner-id", default=os.environ.get("KANBAN_RUNNER_ID"), required=os.environ.get("KANBAN_RUNNER_ID") is None)
     run_parser.add_argument("--psk", default=None, help="Runner PSK; prefer KANBAN_PSK so it does not appear in ps output")
     run_parser.add_argument("--poll-seconds", type=int, default=3)

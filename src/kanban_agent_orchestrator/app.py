@@ -158,7 +158,7 @@ def bearer_psk(authorization: str | None) -> str | None:
     return authorization.removeprefix("Bearer ").strip() if authorization else None
 
 
-def create_app(kernel: OrchestratorKernel | None = None) -> FastAPI:
+def create_public_app(kernel: OrchestratorKernel | None = None) -> FastAPI:
     active_kernel = kernel or OrchestratorKernel.persistent()
     app = FastAPI(title="Kanban Agent Orchestrator", version="0.1.0")
 
@@ -175,7 +175,7 @@ def create_app(kernel: OrchestratorKernel | None = None) -> FastAPI:
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
-        return {"status": "ok"}
+        return {"status": "ok", "surface": "public"}
 
     @app.get("/api/v1/snapshot", response_model=ApiSnapshot)
     def snapshot() -> ApiSnapshot:
@@ -345,6 +345,10 @@ def create_app(kernel: OrchestratorKernel | None = None) -> FastAPI:
     def list_events(since: int = 0) -> list[Event]:
         return active_kernel.list_events(since=since)
 
+    return app
+
+
+def register_runner_routes(app: FastAPI, active_kernel: OrchestratorKernel) -> None:
     @app.post("/runner/v1/lease", response_model=Lease | None)
     def lease_next(payload: LeaseRequest, authorization: str | None = Header(default=None)) -> Lease | None:
         try:
@@ -414,7 +418,29 @@ def create_app(kernel: OrchestratorKernel | None = None) -> FastAPI:
         except OrchestratorError as error:
             raise domain_error(error) from error
 
+    return
+
+
+def create_runner_app(kernel: OrchestratorKernel | None = None) -> FastAPI:
+    active_kernel = kernel or OrchestratorKernel.persistent()
+    app = FastAPI(title="Kanban Agent Orchestrator Runner API", version="0.1.0", docs_url=None, redoc_url=None, openapi_url=None)
+
+    @app.get("/healthz")
+    def healthz() -> dict[str, str]:
+        return {"status": "ok", "surface": "runner"}
+
+    register_runner_routes(app, active_kernel)
     return app
 
 
-app = create_app()
+# Backward-compatible ASGI app for tests/imports. The CLI serves public and runner apps on separate ports.
+def create_app(kernel: OrchestratorKernel | None = None, include_runner_api: bool = True) -> FastAPI:
+    active_kernel = kernel or OrchestratorKernel.persistent()
+    app = create_public_app(active_kernel)
+    if include_runner_api:
+        register_runner_routes(app, active_kernel)
+    return app
+
+
+app = create_public_app()
+runner_app = create_runner_app()

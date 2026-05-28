@@ -28,8 +28,11 @@ function safeUnitName(name: string): string {
   }`;
 }
 
-function serverOrigin(): string {
-  return typeof window === "undefined" ? "http://127.0.0.1:8080" : window.location.origin;
+function runnerOrigin(): string {
+  if (typeof window === "undefined") return "http://127.0.0.1:8082";
+  const url = new URL(window.location.origin);
+  url.port = "8082";
+  return url.origin;
 }
 
 export function App() {
@@ -179,7 +182,7 @@ function RunnersModal({ runners, onChange, onClose }: { runners: Runner[]; onCha
     onChange();
   }
 
-  const origin = serverOrigin();
+  const origin = runnerOrigin();
   const unitName = safeUnitName(created?.runner.name ?? "runner");
   const foregroundCommand = created ? `KANBAN_PSK='${created.psk}' kanban-runner run --server '${origin}' --runner-id '${created.runner.id}'` : "";
   const systemdCommand = created

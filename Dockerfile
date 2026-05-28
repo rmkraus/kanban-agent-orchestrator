@@ -20,7 +20,7 @@ COPY --from=frontend /src/kanban_agent_orchestrator/static ./src/kanban_agent_or
 
 RUN pip install --no-cache-dir uv && uv sync --frozen --no-dev
 
-EXPOSE 8080
+EXPOSE 8080 8082
 VOLUME ["/data"]
 
-CMD ["/app/.venv/bin/kanban-agent-orchestrator", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["/app/.venv/bin/kanban-agent-orchestrator", "--host", "0.0.0.0", "--port", "8080", "--runner-host", "0.0.0.0", "--runner-port", "8082"]

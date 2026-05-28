@@ -3,6 +3,7 @@ services:
     build: .
     ports:
       - "8080:8080"
+      - "8082:8082"
     environment:
       KANBAN_ORCHESTRATOR_DB: /data/orchestrator.json
     volumes:
