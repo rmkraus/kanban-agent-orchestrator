@@ -324,6 +324,13 @@ def create_public_app(kernel: OrchestratorKernel | None = None) -> FastAPI:
         except OrchestratorError as error:
             raise domain_error(error) from error
 
+    @app.post("/api/v1/tasks/{task_id}/scope", response_model=Task)
+    def scope_task(task_id: str) -> Task:
+        try:
+            return active_kernel.scope_task(task_id)
+        except OrchestratorError as error:
+            raise domain_error(error) from error
+
     @app.post("/api/v1/tasks/{task_id}/unblock", response_model=Task)
     def unblock_task(task_id: str) -> Task:
         try:

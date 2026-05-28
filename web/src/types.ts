@@ -1,4 +1,4 @@
-export type TaskStatus = "todo" | "ready" | "running" | "blocked" | "done" | "archived";
+export type TaskStatus = "scoping" | "todo" | "ready" | "running" | "blocked" | "done" | "archived";
 export type RunStatus = "leased" | "running" | "completed" | "failed" | "blocked";
 export type QuestionStatus = "open" | "answered";
 
@@ -37,6 +37,7 @@ export interface Task {
   child_ids: string[];
   created_at: string;
   updated_at: string;
+  completed_at: string | null;
 }
 
 export interface Run {

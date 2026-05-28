@@ -138,7 +138,7 @@ class OrchestratorKernel:
         body: str = "",
         priority: int = 0,
         exclusive: bool = False,
-        status: TaskStatus = TaskStatus.TODO,
+        status: TaskStatus = TaskStatus.SCOPING,
         parent_ids: list[str] | None = None,
         created_by: str = "system",
     ) -> Task:
@@ -284,6 +284,17 @@ class OrchestratorKernel:
         self.recompute_readiness()
         self._save()
 
+    def scope_task(self, task_id: str) -> Task:
+        task = self._task(task_id)
+        if task.status != TaskStatus.SCOPING:
+            raise InvalidTransitionError(f"cannot scope non-scoping task: {task_id}")
+        task.status = TaskStatus.TODO
+        task.updated_at = utc_now()
+        self._event(EventKind.UPDATED, "Task moved from scoping to todo", task_id=task.id)
+        self.recompute_readiness()
+        self._save()
+        return task
+
     def recompute_readiness(self) -> None:
         for task in self.tasks.values():
             if task.status not in {TaskStatus.TODO, TaskStatus.READY}:
@@ -359,6 +370,7 @@ class OrchestratorKernel:
         run.finished_at = now
         task.status = TaskStatus.DONE
         task.updated_at = now
+        task.completed_at = now
         self._event(EventKind.COMPLETED, "Run completed", task_id=task.id, run_id=run.id, metadata={"summary": summary})
         self.recompute_readiness()
         self._save()
@@ -373,7 +385,7 @@ class OrchestratorKernel:
         run.status = RunStatus.FAILED
         run.summary = summary
         run.finished_at = now
-        task.status = TaskStatus.READY if self._parents_done(task) else TaskStatus.TODO
+        task.status = TaskStatus.BLOCKED
         task.updated_at = now
         self._event(EventKind.FAILED, "Run failed", task_id=task.id, run_id=run.id, metadata={"summary": summary})
         self._save()
@@ -448,9 +460,10 @@ class OrchestratorKernel:
             metadata={"question_id": question.id, "answered_by": answered_by},
         )
         if unblock_if_resolved and question.resolves_block and task.status == TaskStatus.BLOCKED:
-            task.status = TaskStatus.READY if self._parents_done(task) else TaskStatus.TODO
+            task.status = TaskStatus.TODO
             task.updated_at = now
             self._event(EventKind.READY, "Task unblocked", task_id=task.id, metadata={"question_id": question.id})
+            self.recompute_readiness()
         self._save()
         return question
 
@@ -458,9 +471,10 @@ class OrchestratorKernel:
         task = self._task(task_id)
         if task.status != TaskStatus.BLOCKED:
             raise InvalidTransitionError(f"cannot unblock non-blocked task: {task_id}")
-        task.status = TaskStatus.READY if self._parents_done(task) else TaskStatus.TODO
+        task.status = TaskStatus.TODO
         task.updated_at = utc_now()
         self._event(EventKind.READY, "Task unblocked", task_id=task.id)
+        self.recompute_readiness()
         self._save()
         return task
 
@@ -510,7 +524,7 @@ class OrchestratorKernel:
                 run.status = RunStatus.FAILED
                 run.finished_at = now
                 task = self._task(run.task_id)
-                task.status = TaskStatus.READY if self._parents_done(task) else TaskStatus.TODO
+                task.status = TaskStatus.BLOCKED
                 task.updated_at = now
                 reclaimed.append(run)
                 self._event(EventKind.RECLAIMED, "Expired lease reclaimed", task_id=task.id, run_id=run.id)

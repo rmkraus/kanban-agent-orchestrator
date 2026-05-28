@@ -10,6 +10,7 @@ def utc_now() -> datetime:
 
 
 class TaskStatus(StrEnum):
+    SCOPING = "scoping"
     TODO = "todo"
     READY = "ready"
     RUNNING = "running"
@@ -86,13 +87,14 @@ class Task(BaseModel):
     title: str
     body: str = ""
     agent_endpoint_id: str
-    status: TaskStatus = TaskStatus.TODO
+    status: TaskStatus = TaskStatus.SCOPING
     priority: int = 0
     exclusive: bool = False
     parent_ids: set[str] = Field(default_factory=set)
     child_ids: set[str] = Field(default_factory=set)
     created_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+    completed_at: datetime | None = None
 
 
 class Run(BaseModel):

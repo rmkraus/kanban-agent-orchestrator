@@ -32,6 +32,8 @@ def test_api_lifecycle_comments_artifacts_and_events() -> None:
     client = make_client()
     endpoint = client.post("/api/v1/agent-endpoints", json={"name": "coder", "max_concurrency": 1}).json()
     task = client.post("/api/v1/tasks", json={"title": "ship it", "agent_endpoint_id": endpoint["id"], "body": "please"}).json()
+    assert task["status"] == TaskStatus.SCOPING
+    scoped = client.post(f"/api/v1/tasks/{task['id']}/scope")
     updated = client.patch(f"/api/v1/tasks/{task['id']}", json={"title": "ship it harder", "body": "# please\n\n- now", "priority": 3, "exclusive": True})
 
     comment = client.post(f"/api/v1/tasks/{task['id']}/comments", json={"body": "working", "author": "runner"})
@@ -42,6 +44,8 @@ def test_api_lifecycle_comments_artifacts_and_events() -> None:
     detail = client.get(f"/api/v1/tasks/{task['id']}").json()
     events = client.get("/api/v1/events").json()
 
+    assert scoped.status_code == 200
+    assert scoped.json()["status"] == TaskStatus.READY
     assert updated.status_code == 200
     assert updated.json()["id"] == task["id"]
     assert updated.json()["context_id"] == task["context_id"]
@@ -54,6 +58,7 @@ def test_api_lifecycle_comments_artifacts_and_events() -> None:
     assert heartbeat.status_code == 200
     assert finish.status_code == 200
     assert detail["task"]["status"] == TaskStatus.DONE
+    assert detail["task"]["completed_at"] is not None
     assert detail["task"]["context_id"] == task["context_id"]
     assert detail["comments"][0]["body"] == "working"
     assert detail["history"] == detail["comments"]
@@ -81,6 +86,8 @@ def test_agent_task_api_creates_task_by_assignee_and_dependencies() -> None:
 
     assert child.status_code == 200
     assert child.json()["parent_ids"] == [parent["id"]]
+    assert child.json()["status"] == TaskStatus.SCOPING
+    assert child.json()["status"] == TaskStatus.SCOPING
     assert detail["children"][0]["id"] == child.json()["id"]
 
 
@@ -89,6 +96,7 @@ def test_runner_can_create_child_task_from_active_run() -> None:
     reviewer = client.post("/api/v1/agent-endpoints", json={"name": "reviewer"}).json()
     client.post("/api/v1/agent-endpoints", json={"name": "coder"}).json()
     parent = client.post("/api/v1/tasks", json={"title": "review", "agent_endpoint_id": reviewer["id"]}).json()
+    client.post(f"/api/v1/tasks/{parent['id']}/scope")
     lease = client.post("/runner/v1/lease", json={"runner_id": "reviewer-runner"}).json()
 
     child = client.post(
@@ -98,12 +106,14 @@ def test_runner_can_create_child_task_from_active_run() -> None:
 
     assert child.status_code == 200
     assert child.json()["parent_ids"] == [parent["id"]]
+    assert child.json()["status"] == TaskStatus.SCOPING
 
 
 def test_runner_question_blocks_task_and_answer_unblocks_it() -> None:
     client = make_client()
     endpoint = client.post("/api/v1/agent-endpoints", json={"name": "coder"}).json()
     task = client.post("/api/v1/tasks", json={"title": "needs input", "agent_endpoint_id": endpoint["id"]}).json()
+    client.post(f"/api/v1/tasks/{task['id']}/scope")
     lease = client.post("/runner/v1/lease", json={"runner_id": "runner-1"}).json()
 
     question_response = client.post(
@@ -135,6 +145,8 @@ def test_answering_non_task_question_is_rejected() -> None:
     endpoint = client.post("/api/v1/agent-endpoints", json={"name": "coder", "max_concurrency": 2}).json()
     first = client.post("/api/v1/tasks", json={"title": "first", "agent_endpoint_id": endpoint["id"]}).json()
     second = client.post("/api/v1/tasks", json={"title": "second", "agent_endpoint_id": endpoint["id"]}).json()
+    client.post(f"/api/v1/tasks/{first['id']}/scope")
+    client.post(f"/api/v1/tasks/{second['id']}/scope")
     lease = client.post("/runner/v1/lease", json={"runner_id": "runner-1"}).json()
     question = client.post(f"/runner/v1/runs/{lease['run']['id']}/questions", json={"body": "Question for first."}).json()
 
@@ -151,6 +163,7 @@ def test_api_blocks_and_unblocks_task() -> None:
     client = make_client()
     endpoint = client.post("/api/v1/agent-endpoints", json={"name": "coder"}).json()
     task = client.post("/api/v1/tasks", json={"title": "needs input", "agent_endpoint_id": endpoint["id"]}).json()
+    client.post(f"/api/v1/tasks/{task['id']}/scope")
     lease = client.post("/runner/v1/lease", json={"runner_id": "runner-1"}).json()
 
     blocked = client.post(f"/runner/v1/runs/{lease['run']['id']}/block", json={"reason": "need human"}).json()

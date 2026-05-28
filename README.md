@@ -88,8 +88,13 @@ curl -s -X POST http://127.0.0.1:8080/api/v1/runners \
   -H 'content-type: application/json' \
   -d '{"name":"spark-0"}'
 
-# 2. Install the persistent runner service. Pass the PSK on stdin.
-printf '%s' "$KANBAN_RUNNER_PSK" | sudo kanban-runner install-systemd \
+# 2. Install/update the runner CLI from GitHub.
+command -v pipx >/dev/null || (sudo apt-get update && sudo apt-get install -y pipx)
+pipx install --force 'git+https://github.com/rmkraus/kanban-agent-orchestrator.git'
+RUNNER_BIN="$(command -v kanban-runner || printf '%s/.local/bin/kanban-runner' "$HOME")"
+
+# 3. Install the persistent runner service. Pass the PSK on stdin.
+printf '%s' "$KANBAN_RUNNER_PSK" | sudo "$RUNNER_BIN" install-systemd \
   --server http://127.0.0.1:8082 \
   --runner-id "$KANBAN_RUNNER_ID" \
   --name kanban-runner-spark-0 \

@@ -10,6 +10,7 @@ import {
   getSnapshot,
   getStats,
   getTaskDetail,
+  scopeTask,
   unblockTask,
   updateEndpoint,
   updateRunner,
@@ -17,7 +18,8 @@ import {
 } from "./api";
 import type { AgentEndpoint, BoardStats, Runner, RunnerCreateResult, Snapshot, Task, TaskDetail, TaskStatus } from "./types";
 
-const statuses: TaskStatus[] = ["todo", "ready", "running", "blocked", "done"];
+const statuses: TaskStatus[] = ["scoping", "todo", "ready", "running", "blocked", "done"];
+const runnerPackageUrl = "git+https://github.com/rmkraus/kanban-agent-orchestrator.git";
 
 function endpointName(endpoints: AgentEndpoint[], id: string): string {
   return endpoints.find((endpoint) => endpoint.id === id)?.name ?? id.slice(0, 8);
@@ -191,8 +193,6 @@ export function App() {
                     <div className="card-title">{task.title}</div>
                     <div className="card-meta">{endpointName(backends, task.agent_endpoint_id)}</div>
                     <div className="badges">
-                      <span title={task.id}>id {shortId(task.id)}</span>
-                      <span title={task.context_id}>ctx {shortId(task.context_id)}</span>
                       <span>p{task.priority}</span>
                       <span>{task.parent_ids.length} parents</span>
                       <span>{task.child_ids.length} children</span>
@@ -253,9 +253,17 @@ function RunnersModal({ runners, onChange, onClose }: { runners: Runner[]; onCha
 
   const origin = runnerOrigin();
   const unitName = safeUnitName(created?.runner.name ?? "runner");
-  const foregroundCommand = created ? `KANBAN_PSK='${created.psk}' kanban-runner run --server '${origin}' --runner-id '${created.runner.id}'` : "";
+  const foregroundCommand = created
+    ? `command -v pipx >/dev/null || (sudo apt-get update && sudo apt-get install -y pipx)
+pipx install --force '${runnerPackageUrl}'
+RUNNER_BIN="$(command -v kanban-runner || printf '%s/.local/bin/kanban-runner' "$HOME")"
+KANBAN_PSK='${created.psk}' "$RUNNER_BIN" run --server '${origin}' --runner-id '${created.runner.id}'`
+    : "";
   const systemdCommand = created
-    ? `printf '%s' '${created.psk}' | sudo kanban-runner install-systemd --server '${origin}' --runner-id '${created.runner.id}' --name '${unitName}' --psk-stdin`
+    ? `command -v pipx >/dev/null || (sudo apt-get update && sudo apt-get install -y pipx)
+pipx install --force '${runnerPackageUrl}'
+RUNNER_BIN="$(command -v kanban-runner || printf '%s/.local/bin/kanban-runner' "$HOME")"
+printf '%s' '${created.psk}' | sudo "$RUNNER_BIN" install-systemd --server '${origin}' --runner-id '${created.runner.id}' --name '${unitName}' --psk-stdin`
     : "";
 
   return (
@@ -291,11 +299,11 @@ function RunnersModal({ runners, onChange, onClose }: { runners: Runner[]; onCha
             <p className="muted">The PSK is shown once. Save this command now or rotate later. Security theater avoided, barely.</p>
             <label>
               Foreground test
-              <textarea readOnly rows={3} value={foregroundCommand} />
+              <textarea readOnly rows={6} value={foregroundCommand} />
             </label>
             <label>
               Install as systemd service
-              <textarea readOnly rows={4} value={systemdCommand} />
+              <textarea readOnly rows={8} value={systemdCommand} />
             </label>
           </section>
         )}
@@ -636,8 +644,16 @@ function TaskPanel({
             <dd title={selectedTask.context_id}> {shortId(selectedTask.context_id)}</dd>
           </div>
           <div>
+            <dt>Created</dt>
+            <dd>{formatDate(selectedTask.created_at)}</dd>
+          </div>
+          <div>
             <dt>Updated</dt>
             <dd>{formatDate(selectedTask.updated_at)}</dd>
+          </div>
+          <div>
+            <dt>Completed</dt>
+            <dd>{formatDate(selectedTask.completed_at)}</dd>
           </div>
           <div>
             <dt>Parents</dt>
@@ -649,11 +665,18 @@ function TaskPanel({
           </div>
         </dl>
 
-        {selectedTask.status === "blocked" && (
-          <button className="secondary full-width" onClick={() => void unblockTask(selectedTask.id).then(onChange)}>
-            Unblock manually
-          </button>
-        )}
+        <div className="workflow-actions">
+          {selectedTask.status === "scoping" && (
+            <button className="secondary full-width" onClick={() => void scopeTask(selectedTask.id).then(onChange)}>
+              Move to todo
+            </button>
+          )}
+          {selectedTask.status === "blocked" && (
+            <button className="secondary full-width" onClick={() => void unblockTask(selectedTask.id).then(onChange)}>
+              Send back to ready
+            </button>
+          )}
+        </div>
 
         <section className="thread-section">
           <h3>Artifacts</h3>

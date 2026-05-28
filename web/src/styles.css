@@ -327,6 +327,11 @@ button:disabled {
   width: 100%;
 }
 
+.workflow-actions {
+  display: grid;
+  gap: 8px;
+}
+
 .icon-button {
   display: inline-flex;
   align-items: center;
@@ -357,7 +362,7 @@ button:disabled {
 
 .board {
   display: grid;
-  grid-template-columns: repeat(5, minmax(190px, 1fr));
+  grid-template-columns: repeat(6, minmax(190px, 1fr));
   gap: 12px;
   min-height: 0;
   height: 100%;
@@ -412,6 +417,11 @@ button:disabled {
   box-shadow: 0 0 0 3px rgba(47, 111, 104, 0.1);
 }
 
+.task-card.scoping {
+  border-color: #d6c5a5;
+  background: #fffaf0;
+}
+
 .task-card.blocked {
   border-color: #e7b7a7;
   background: #fff7f3;
@@ -456,6 +466,12 @@ button:disabled {
 .status-pill.open {
   background: #ffe6dc;
   color: #9f2d20;
+}
+
+.status-pill.scoping,
+.status-pill.todo {
+  background: #f3ead7;
+  color: #7a4d12;
 }
 
 .status-pill.ready,
@@ -709,7 +725,7 @@ dd {
   }
 
   .board {
-    grid-template-columns: repeat(5, minmax(78vw, 1fr));
+    grid-template-columns: repeat(6, minmax(78vw, 1fr));
     order: 1;
     margin-inline: -14px;
     padding-inline: 14px;
@@ -763,7 +779,7 @@ dd {
   }
 
   .board {
-    grid-template-columns: repeat(5, minmax(86vw, 1fr));
+    grid-template-columns: repeat(6, minmax(86vw, 1fr));
   }
 
   .panel,

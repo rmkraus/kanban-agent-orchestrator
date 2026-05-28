@@ -67,6 +67,10 @@ export function addComment(taskId: string, payload: { body: string; author: stri
   return request<Comment>(`/api/v1/tasks/${taskId}/comments`, { method: "POST", body: JSON.stringify(payload) });
 }
 
+export function scopeTask(taskId: string): Promise<Task> {
+  return request<Task>(`/api/v1/tasks/${taskId}/scope`, { method: "POST" });
+}
+
 export function unblockTask(taskId: string): Promise<Task> {
   return request<Task>(`/api/v1/tasks/${taskId}/unblock`, { method: "POST" });
 }
