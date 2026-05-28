@@ -59,6 +59,14 @@ class TaskCreate(BaseModel):
     created_by: str = "system"
 
 
+class TaskUpdate(BaseModel):
+    title: str | None = None
+    agent_endpoint_id: str | None = None
+    body: str | None = None
+    priority: int | None = None
+    exclusive: bool | None = None
+
+
 class AgentTaskCreate(BaseModel):
     title: str
     assignee: str
@@ -275,6 +283,20 @@ def create_public_app(kernel: OrchestratorKernel | None = None) -> FastAPI:
                 exclusive=payload.exclusive,
                 parent_ids=payload.parent_ids,
                 created_by=payload.created_by,
+            )
+        except OrchestratorError as error:
+            raise domain_error(error) from error
+
+    @app.patch("/api/v1/tasks/{task_id}", response_model=Task)
+    def update_task(task_id: str, payload: TaskUpdate) -> Task:
+        try:
+            return active_kernel.update_task(
+                task_id=task_id,
+                title=payload.title,
+                agent_endpoint_id=payload.agent_endpoint_id,
+                body=payload.body,
+                priority=payload.priority,
+                exclusive=payload.exclusive,
             )
         except OrchestratorError as error:
             raise domain_error(error) from error

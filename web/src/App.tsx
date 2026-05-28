@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import ReactMarkdown from "react-markdown";
 
 import {
   addComment,
@@ -12,6 +13,7 @@ import {
   unblockTask,
   updateEndpoint,
   updateRunner,
+  updateTask,
 } from "./api";
 import type { AgentEndpoint, BoardStats, Runner, RunnerCreateResult, Snapshot, Task, TaskDetail, TaskStatus } from "./types";
 
@@ -45,6 +47,10 @@ function runnerOrigin(): string {
   const url = new URL(window.location.origin);
   url.port = "8082";
   return url.origin;
+}
+
+function shortId(id: string): string {
+  return id.slice(0, 8);
 }
 
 export function App() {
@@ -184,8 +190,9 @@ export function App() {
                   >
                     <div className="card-title">{task.title}</div>
                     <div className="card-meta">{endpointName(backends, task.agent_endpoint_id)}</div>
-                    {task.body && <p>{task.body}</p>}
                     <div className="badges">
+                      <span title={task.id}>id {shortId(task.id)}</span>
+                      <span title={task.context_id}>ctx {shortId(task.context_id)}</span>
                       <span>p{task.priority}</span>
                       <span>{task.parent_ids.length} parents</span>
                       <span>{task.child_ids.length} children</span>
@@ -517,6 +524,21 @@ function TaskPanel({
   onClose: () => void;
 }) {
   const [comment, setComment] = useState("");
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState(selectedTask?.title ?? "");
+  const [editBody, setEditBody] = useState(selectedTask?.body ?? "");
+  const [editEndpointId, setEditEndpointId] = useState(selectedTask?.agent_endpoint_id ?? "");
+  const [editPriority, setEditPriority] = useState(selectedTask?.priority ?? 0);
+  const [editExclusive, setEditExclusive] = useState(selectedTask?.exclusive ?? false);
+
+  useEffect(() => {
+    setIsEditing(false);
+    setEditTitle(selectedTask?.title ?? "");
+    setEditBody(selectedTask?.body ?? "");
+    setEditEndpointId(selectedTask?.agent_endpoint_id ?? "");
+    setEditPriority(selectedTask?.priority ?? 0);
+    setEditExclusive(selectedTask?.exclusive ?? false);
+  }, [selectedTask?.id]);
 
   if (!selectedTask || !detail) {
     return null;
@@ -530,6 +552,20 @@ function TaskPanel({
     onChange();
   }
 
+  async function submitEdit(event: FormEvent) {
+    event.preventDefault();
+    if (!editTitle.trim() || !editEndpointId) return;
+    await updateTask(selectedTask!.id, {
+      title: editTitle.trim(),
+      body: editBody,
+      agent_endpoint_id: editEndpointId,
+      priority: editPriority,
+      exclusive: editExclusive,
+    });
+    setIsEditing(false);
+    onChange();
+  }
+
   return (
     <div className="modal-backdrop" role="presentation" onClick={onClose}>
       <aside className="detail-panel" role="dialog" aria-modal="true" aria-labelledby="task-detail-title" onClick={(event) => event.stopPropagation()}>
@@ -539,18 +575,65 @@ function TaskPanel({
             <h2 id="task-detail-title">{selectedTask.title}</h2>
           </div>
           <div className="detail-actions">
+            <button className="secondary" type="button" onClick={() => setIsEditing((editing) => !editing)}>
+              {isEditing ? "Cancel" : "Edit"}
+            </button>
             <span className={`status-pill ${selectedTask.status}`}>{selectedTask.status}</span>
             <button className="icon-button" type="button" aria-label="Close task detail" onClick={onClose}>
               ×
             </button>
           </div>
         </div>
-        {selectedTask.body && <p className="task-body">{selectedTask.body}</p>}
+
+        {isEditing ? (
+          <form onSubmit={(event) => void submitEdit(event)} className="stacked-form edit-task-form">
+            <label>
+              Title
+              <input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} />
+            </label>
+            <label>
+              Backend
+              <select value={editEndpointId} onChange={(event) => setEditEndpointId(event.target.value)}>
+                {endpoints.map((endpoint) => (
+                  <option value={endpoint.id} key={endpoint.id}>
+                    {endpoint.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Body (Markdown)
+              <textarea value={editBody} onChange={(event) => setEditBody(event.target.value)} rows={8} />
+            </label>
+            <label>
+              Priority
+              <input type="number" value={editPriority} onChange={(event) => setEditPriority(Number(event.target.value || 0))} />
+            </label>
+            <label className="checkbox-row">
+              <input type="checkbox" checked={editExclusive} onChange={(event) => setEditExclusive(event.target.checked)} /> Exclusive
+            </label>
+            <button type="submit">Save changes</button>
+          </form>
+        ) : (
+          selectedTask.body && (
+            <section className="markdown-body task-body">
+              <ReactMarkdown>{selectedTask.body}</ReactMarkdown>
+            </section>
+          )
+        )}
 
         <dl className="meta-grid">
           <div>
             <dt>Priority</dt>
             <dd>{selectedTask.priority}</dd>
+          </div>
+          <div>
+            <dt>ID</dt>
+            <dd title={selectedTask.id}> {shortId(selectedTask.id)}</dd>
+          </div>
+          <div>
+            <dt>Context</dt>
+            <dd title={selectedTask.context_id}> {shortId(selectedTask.context_id)}</dd>
           </div>
           <div>
             <dt>Updated</dt>
@@ -571,6 +654,25 @@ function TaskPanel({
             Unblock manually
           </button>
         )}
+
+        <section className="thread-section">
+          <h3>Artifacts</h3>
+          <div className="artifacts">
+            {detail.artifacts.map((artifact) => (
+              <article className="artifact" key={artifact.id}>
+                <div>
+                  <strong>{artifact.filename}</strong>
+                  <span>{formatDate(artifact.created_at)}</span>
+                </div>
+                {artifact.description && <p className="muted">{artifact.description}</p>}
+                <div className="markdown-body">
+                  <ReactMarkdown>{artifact.content_markdown}</ReactMarkdown>
+                </div>
+              </article>
+            ))}
+            {detail.artifacts.length === 0 && <p className="muted">No artifacts yet.</p>}
+          </div>
+        </section>
 
         <section className="thread-section">
           <h3>Chat</h3>

@@ -32,6 +32,7 @@ def test_api_lifecycle_comments_artifacts_and_events() -> None:
     client = make_client()
     endpoint = client.post("/api/v1/agent-endpoints", json={"name": "coder", "max_concurrency": 1}).json()
     task = client.post("/api/v1/tasks", json={"title": "ship it", "agent_endpoint_id": endpoint["id"], "body": "please"}).json()
+    updated = client.patch(f"/api/v1/tasks/{task['id']}", json={"title": "ship it harder", "body": "# please\n\n- now", "priority": 3, "exclusive": True})
 
     comment = client.post(f"/api/v1/tasks/{task['id']}/comments", json={"body": "working", "author": "runner"})
     artifact = client.post(f"/api/v1/tasks/{task['id']}/artifacts", json={"filename": "handoff.md", "content_markdown": "done"})
@@ -41,12 +42,21 @@ def test_api_lifecycle_comments_artifacts_and_events() -> None:
     detail = client.get(f"/api/v1/tasks/{task['id']}").json()
     events = client.get("/api/v1/events").json()
 
+    assert updated.status_code == 200
+    assert updated.json()["id"] == task["id"]
+    assert updated.json()["context_id"] == task["context_id"]
+    assert updated.json()["title"] == "ship it harder"
+    assert updated.json()["body"] == "# please\n\n- now"
+    assert updated.json()["priority"] == 3
+    assert updated.json()["exclusive"] is True
     assert comment.status_code == 200
     assert artifact.status_code == 200
     assert heartbeat.status_code == 200
     assert finish.status_code == 200
     assert detail["task"]["status"] == TaskStatus.DONE
+    assert detail["task"]["context_id"] == task["context_id"]
     assert detail["comments"][0]["body"] == "working"
+    assert detail["history"] == detail["comments"]
     assert detail["artifacts"][0]["filename"] == "handoff.md"
     assert any(event["kind"] == "completed" for event in events)
 

@@ -231,16 +231,44 @@ class OrchestratorKernel:
 
     def task_detail(self, task_id: str) -> TaskDetail:
         task = self._task(task_id)
+        history = sorted((comment for comment in self.comments.values() if comment.task_id == task_id), key=lambda comment: comment.created_at)
         return TaskDetail(
             task=task,
             parents=[self._task(parent_id) for parent_id in sorted(task.parent_ids)],
             children=[self._task(child_id) for child_id in sorted(task.child_ids)],
-            runs=[run for run in self.runs.values() if run.task_id == task_id],
-            comments=[comment for comment in self.comments.values() if comment.task_id == task_id],
+            runs=sorted((run for run in self.runs.values() if run.task_id == task_id), key=lambda run: run.started_at),
+            comments=history,
+            history=history,
             questions=sorted((question for question in self.questions.values() if question.task_id == task_id), key=lambda question: question.created_at),
-            artifacts=[artifact for artifact in self.artifacts.values() if artifact.task_id == task_id],
+            artifacts=sorted((artifact for artifact in self.artifacts.values() if artifact.task_id == task_id), key=lambda artifact: artifact.created_at),
             events=[event for event in self.events if event.task_id == task_id],
         )
+
+    def update_task(
+        self,
+        task_id: str,
+        title: str | None = None,
+        agent_endpoint_id: str | None = None,
+        body: str | None = None,
+        priority: int | None = None,
+        exclusive: bool | None = None,
+    ) -> Task:
+        task = self._task(task_id)
+        if agent_endpoint_id is not None:
+            self._agent_endpoint(agent_endpoint_id)
+            task.agent_endpoint_id = agent_endpoint_id
+        if title is not None:
+            task.title = title
+        if body is not None:
+            task.body = body
+        if priority is not None:
+            task.priority = priority
+        if exclusive is not None:
+            task.exclusive = exclusive
+        task.updated_at = utc_now()
+        self._event(EventKind.UPDATED, "Task updated", task_id=task.id)
+        self._save()
+        return task
 
     def add_dependency(self, parent_id: str, child_id: str) -> None:
         parent = self._task(parent_id)

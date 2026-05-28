@@ -46,6 +46,7 @@ class EventKind(StrEnum):
     DELETED = "deleted"
     QUESTION_ASKED = "question_asked"
     QUESTION_ANSWERED = "question_answered"
+    UPDATED = "updated"
 
 
 class Runner(BaseModel):
@@ -81,6 +82,7 @@ class AgentEndpoint(BaseModel):
 
 class Task(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
+    context_id: str = Field(default_factory=lambda: str(uuid4()))
     title: str
     body: str = ""
     agent_endpoint_id: str
@@ -158,6 +160,7 @@ class TaskDetail(BaseModel):
     children: list[Task]
     runs: list[Run]
     comments: list[Comment]
+    history: list[Comment]
     questions: list[Question]
     artifacts: list[Artifact]
     events: list[Event]

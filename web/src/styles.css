@@ -204,7 +204,8 @@ h3 {
 .column-header,
 .detail-header,
 .endpoint-row,
-.comment > div {
+.comment > div,
+.artifact > div {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -232,6 +233,7 @@ h3 {
 .endpoint-row small,
 .muted,
 .comment span,
+.artifact span,
 .card-meta {
   color: #667085;
   font-size: 12px;
@@ -550,7 +552,8 @@ dd {
   margin-top: 18px;
 }
 
-.comment {
+.comment,
+.artifact {
   border: 1px solid #e1dbd1;
   border-radius: 14px;
   background: #fffdf8;
@@ -563,9 +566,52 @@ dd {
   line-height: 1.4;
 }
 
-.comments {
+.comments,
+.artifacts {
   display: grid;
   gap: 8px;
+}
+
+.edit-task-form {
+  margin-top: 12px;
+}
+
+.markdown-body {
+  color: #475467;
+  line-height: 1.5;
+}
+
+.markdown-body p,
+.markdown-body ul,
+.markdown-body ol,
+.markdown-body pre,
+.markdown-body blockquote {
+  margin: 0.5rem 0;
+}
+
+.markdown-body ul,
+.markdown-body ol {
+  padding-left: 1.25rem;
+}
+
+.markdown-body code {
+  border-radius: 6px;
+  background: #f0ece4;
+  padding: 0.1rem 0.25rem;
+}
+
+.markdown-body pre {
+  overflow-x: auto;
+  border-radius: 12px;
+  background: #111827;
+  color: #fffdf8;
+  padding: 12px;
+}
+
+.markdown-body pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
 }
 
 .inline-form {
@@ -727,11 +773,13 @@ dd {
   }
 
   .comment > div,
+  .artifact > div,
   .detail-header {
     align-items: flex-start;
   }
 
-  .comment > div {
+  .comment > div,
+  .artifact > div {
     display: grid;
   }
 }

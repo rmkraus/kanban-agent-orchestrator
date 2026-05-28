@@ -56,6 +56,13 @@ export function createTask(payload: { title: string; body: string; agent_endpoin
   return request<Task>("/api/v1/tasks", { method: "POST", body: JSON.stringify(payload) });
 }
 
+export function updateTask(
+  taskId: string,
+  payload: { title?: string; body?: string; agent_endpoint_id?: string; priority?: number; exclusive?: boolean },
+): Promise<Task> {
+  return request<Task>(`/api/v1/tasks/${taskId}`, { method: "PATCH", body: JSON.stringify(payload) });
+}
+
 export function addComment(taskId: string, payload: { body: string; author: string }): Promise<Comment> {
   return request<Comment>(`/api/v1/tasks/${taskId}/comments`, { method: "POST", body: JSON.stringify(payload) });
 }

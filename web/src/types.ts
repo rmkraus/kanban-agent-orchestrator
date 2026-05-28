@@ -26,6 +26,7 @@ export interface AgentEndpoint {
 
 export interface Task {
   id: string;
+  context_id: string;
   title: string;
   body: string;
   agent_endpoint_id: string;
@@ -110,6 +111,7 @@ export interface TaskDetail {
   children: Task[];
   runs: Run[];
   comments: Comment[];
+  history: Comment[];
   questions: Question[];
   artifacts: Artifact[];
   events: Event[];
